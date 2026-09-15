@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>每日打卡</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  padding: 20px;
+  padding-bottom: 100px;
+}
+
+.container { max-width: 480px; margin: 0 auto; }
+
+.header { text-align: center; color: white; margin-bottom: 16px; }
+.header h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; }
+.header p { opacity: 0.9; font-size: 14px; }
+
+.toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
+.toolbar-btn {
+  flex: 1; padding: 10px; border: none; border-radius: 10px;
+  background: rgba(255,255,255,0.22); color: white; font-size: 13px;
+  font-weight: 500; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.toolbar-btn:active { background: rgba(255,255,255,0.4); }
+
+.card {
+  background: white; border-radius: 16px; margin-bottom: 16px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden;
+}
+.card.archived { opacity: 0.85; }
+
+.habit-header {
+  padding: 18px 16px; display: flex; justify-content: space-between;
+  align-items: center; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.habit-header:active { background: #f8f8f8; }
+.habit-info { min-width: 0; flex: 1; }
+.habit-info h3 { font-size: 17px; color: #333; margin-bottom: 4px; }
+.habit-info .date-info { font-size: 12px; color: #888; margin-bottom: 6px; }
+.habit-info .streak-info { font-size: 12px; color: #ff9500; font-weight: 500; }
+
+.habit-stats { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.progress-text { font-size: 13px; color: #667eea; font-weight: 600; white-space: nowrap; margin-right: 2px; }
+
+.arrow { font-size: 18px; color: #999; transition: transform 0.3s; }
+.arrow.expanded { transform: rotate(180deg); }
+
+.icon-btn {
+  width: 34px; height: 34px; border-radius: 50%; border: none;
+  background: #f5f5f5; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; cursor: pointer; transition: all 0.15s; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+}
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.icon-btn.locked { background: #ff9500; color: white; }
+.icon-btn.delete-btn { background: #ffebee; }
+.icon-btn.delete-btn.locked { background: #ff9500; color: white; }
+
+.progress-bar-small {
+  height: 4px; background: #eee; border-radius: 2px; overflow: hidden; margin-top: 6px; width: 100%;
+}
+.progress-fill-small {
+  height: 100%; background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 2px; transition: width 0.3s ease;
+}
+
+.date-list { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; background: #fafafa; }
+.date-list.expanded { max-height: none; }
+
+.long-press-hint {
+  text-align: center; padding: 8px; font-size: 11px; color: #888; background: #f5f5f5;
+}
+
+.month-group { border-top: 1px solid #eee; }
+.month-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px; background: #f0f0f5; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: #555;
+  -webkit-tap-highlight-color: transparent;
+}
+.month-header:active { background: #e8e8f0; }
+.month-arrow { font-size: 11px; color: #999; }
+
+.date-item {
+  display: flex; align-items: center; padding: 11px 14px;
+  border-top: 1px solid #eee; -webkit-tap-highlight-color: transparent;
+  position: relative; gap: 6px; flex-wrap: nowrap;
+}
+.date-item:active { background: #f0f0f0; }
+.date-item.locked { opacity: 0.55; }
+
+.date-number {
+  width: 34px; height: 34px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-weight: 700; font-size: 13px;
+  margin-right: 8px; flex-shrink: 0;
+}
+.date-number.locked { background: #999; }
+
+.date-text {
+  flex: 1; font-size: 14px; color: #333; min-width: 0;
+  display: flex; align-items: center; gap: 4px;
+}
+
+.note-btn {
+  border: none; background: transparent; font-size: 13px; cursor: pointer;
+  padding: 2px 4px; border-radius: 4px; -webkit-tap-highlight-color: transparent;
+  opacity: 0.35; flex-shrink: 0; line-height: 1;
+}
+.note-btn.has-note { opacity: 1; }
+.note-btn:active { background: #eee; }
+
+.date-progress {
+  font-size: 12px; color: #888; margin-right: 2px; flex-shrink: 0;
+  min-width: 30px; text-align: center; font-weight: 500;
+}
+.date-progress.done { color: #4cd964; }
+
+.check-btn {
+  width: 42px; height: 42px; border-radius: 50%; border: 2px solid #ddd;
+  background: white; display: flex; align-items: center; justify-content: center;
+  font-size: 19px; cursor: pointer; transition: all 0.15s; flex-shrink: 0;
+}
+.check-btn.checked { background: #4cd964; border-color: #4cd964; color: white; }
+.check-btn.locked { border-color: #ff9500; background: #fff8e1; cursor: not-allowed; }
+.check-btn.locked.checked { background: #a0d8a0; border-color: #a0d8a0; }
+.check-btn:active:not(.locked) { transform: scale(0.95); }
+
+.slot-group { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.slot-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: 2px solid #ddd;
+  background: white; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: #999; cursor: pointer;
+  transition: all 0.15s; flex-shrink: 0; user-select: none;
+  flex-direction: column; line-height: 1;
+}
+.slot-btn .label { font-size: 12px; font-weight: 700; }
+.slot-btn .sub-label { font-size: 7px; font-weight: 400; opacity: 0.75; margin-top: 1px; }
+.slot-btn.checked { background: #4cd964; border-color: #4cd964; color: white; }
+.slot-btn.locked { border-color: #ff9500; background: #fff8e1; cursor: not-allowed; color: #bbb; }
+.slot-btn.locked.checked { background: #a0d8a0; border-color: #a0d8a0; color: white; }
+.slot-btn:active:not(.locked) { transform: scale(0.92); }
+
+.date-lock-icon { font-size: 13px; flex-shrink: 0; }
+
+.habit-footer {
+  display: flex; padding: 10px 14px; border-top: 1px solid #eee;
+  background: #fafafa; gap: 6px; flex-wrap: wrap;
+}
+.btn-small {
+  flex: 1; padding: 9px 10px; border: none; border-radius: 8px;
+  font-size: 12px; font-weight: 500; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; text-align: center; min-width: 50px;
+}
+.btn-small:active { opacity: 0.8; }
+.btn-small:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-check-all { background: #667eea; color: white; }
+.btn-uncheck-all { background: #f0f0f0; color: #666; }
+.btn-add-days { background: #e3f2fd; color: #2196f3; }
+.btn-move { background: #f5f0ff; color: #7c4dff; }
+.add-days-footer { border-top: 1px dashed #ddd; }
+
+.chart-wrap { padding: 12px 14px; background: #fafafa; border-top: 1px solid #eee; }
+.chart-title { font-size: 12px; color: #888; margin-bottom: 6px; }
+.chart-canvas { width: 100%; height: 50px; display: block; }
+
+.add-card {
+  background: rgba(255,255,255,0.2); border: 2px dashed rgba(255,255,255,0.5);
+  border-radius: 16px; padding: 22px; text-align: center; cursor: pointer;
+  transition: all 0.2s; -webkit-tap-highlight-color: transparent;
+}
+.add-card:active { transform: scale(0.98); background: rgba(255,255,255,0.3); }
+.add-card .icon { font-size: 38px; margin-bottom: 8px; }
+.add-card .text { color: white; font-size: 16px; font-weight: 500; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; opacity: 0; visibility: hidden; transition: all 0.3s; padding: 20px;
+}
+.modal-overlay.active { opacity: 1; visibility: visible; }
+.modal {
+  background: white; border-radius: 20px; padding: 22px; width: 100%;
+  max-width: 360px; transform: translateY(20px); transition: transform 0.3s;
+  max-height: 88vh; overflow-y: auto;
+}
+.modal-overlay.active .modal { transform: translateY(0); }
+.modal h2 { font-size: 19px; margin-bottom: 18px; text-align: center; }
+
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 13px; color: #666; margin-bottom: 6px; }
+.form-group input[type="text"],
+.form-group input[type="date"],
+.form-group input[type="number"],
+.form-group textarea {
+  width: 100%; padding: 12px 14px; border: 2px solid #eee;
+  border-radius: 12px; font-size: 15px; transition: border-color 0.2s;
+  font-family: inherit; resize: vertical;
+}
+.form-group input:focus, .form-group textarea:focus { outline: none; border-color: #667eea; }
+.char-count { font-size: 11px; color: #aaa; text-align: right; margin-top: 4px; }
+
+.mode-selector { display: flex; gap: 6px; }
+.mode-option {
+  flex: 1; padding: 9px 4px; border: 2px solid #eee; border-radius: 12px;
+  text-align: center; cursor: pointer; transition: all 0.2s; background: #fafafa;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+}
+.mode-option:active { transform: scale(0.96); }
+.mode-option .mode-label { display: block; font-size: 14px; font-weight: 600; color: #333; }
+.mode-option .mode-desc { display: block; font-size: 10px; color: #999; margin-top: 2px; }
+.mode-option.selected { border-color: #667eea; background: #eef0ff; }
+.mode-option.selected .mode-label { color: #667eea; }
+
+.slot-names { display: flex; gap: 6px; margin-top: 4px; }
+.slot-names input {
+  flex: 1; padding: 8px 10px; border: 2px solid #eee;
+  border-radius: 10px; font-size: 13px; text-align: center; min-width: 0;
+}
+.slot-names input:focus { outline: none; border-color: #667eea; }
+
+.modal-btns { display: flex; gap: 10px; margin-top: 20px; }
+.modal-btns .btn {
+  flex: 1; padding: 13px; border: none; border-radius: 12px;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.btn-cancel { background: #f5f5f5; color: #666; }
+.btn-confirm { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+.btn-danger { background: #ff3b30; color: white; }
+
+.empty-state { text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.8); }
+.empty-state .icon { font-size: 60px; margin-bottom: 14px; }
+
+.footer-hint {
+  text-align: center; color: rgba(255,255,255,0.7); font-size: 11px;
+  margin-top: 18px; padding: 14px; line-height: 1.7;
+}
+
+/* 撤销删除条 */
+.undo-bar {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: #333; color: white; padding: 12px 16px; border-radius: 12px;
+  display: flex; align-items: center; gap: 14px; font-size: 14px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.3); z-index: 2000;
+  max-width: calc(100% - 40px);
+  animation: undoSlideUp 0.3s ease;
+}
+.undo-bar button {
+  background: #667eea; border: none; color: white; padding: 6px 14px;
+  border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+  flex-shrink: 0;
+}
+@keyframes undoSlideUp {
+  from { opacity: 0; transform: translate(-50%, 20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-color-scheme: dark) {
+  body { background: linear-gradient(135deg, #1a202c 0%, #322a4a 100%); }
+  .card { background: #2d3748; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+  .habit-header:active { background: #3a4556; }
+  .habit-info h3 { color: #e2e8f0; }
+  .habit-info .date-info { color: #a0aec0; }
+  .progress-text { color: #9aa8f0; }
+  .arrow { color: #a0aec0; }
+  .progress-bar-small { background: #4a5568; }
+  .icon-btn { background: #3a4556; color: #cbd5e0; }
+  .icon-btn.delete-btn { background: #4a2c2c; }
+  .date-list { background: #252d3d; }
+  .long-press-hint { background: #2a3344; color: #a0aec0; }
+  .month-group { border-top-color: #3a4556; }
+  .month-header { background: #2a3344; color: #cbd5e0; }
+  .month-header:active { background: #333d50; }
+  .date-item { border-top-color: #3a4556; }
+  .date-item:active { background: #374357; }
+  .date-text { color: #cbd5e0; }
+  .date-progress { color: #a0aec0; }
+  .check-btn { background: #2d3748; border-color: #4a5568; }
+  .check-btn.locked { background: #4a3a1a; border-color: #ff9500; }
+  .slot-btn { background: #2d3748; border-color: #4a5568; }
+  .slot-btn.locked { background: #4a3a1a; border-color: #ff9500; }
+  .habit-footer { background: #252d3d; border-top-color: #3a4556; }
+  .btn-uncheck-all { background: #3a4556; color: #cbd5e0; }
+  .btn-add-days { background: #1e3a5f; color: #63b3ed; }
+  .btn-move { background: #2a2140; color: #b39ddb; }
+  .add-days-footer { border-top-color: #3a4556; }
+  .chart-wrap { background: #252d3d; border-top-color: #3a4556; }
+  .chart-title { color: #a0aec0; }
+  .modal { background: #2d3748; color: #e2e8f0; }
+  .modal h2 { color: #e2e8f0; }
+  .form-group label { color: #a0aec0; }
+  .form-group input, .form-group textarea {
+    background: #1a202c; border-color: #4a5568; color: #e2e8f0;
+  }
+  .mode-option { background: #1a202c; border-color: #4a5568; }
+  .mode-option .mode-label { color: #cbd5e0; }
+  .mode-option.selected { background: #2a3560; border-color: #667eea; }
+  .mode-option.selected .mode-label { color: #9aa8f0; }
+  .slot-names input { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+  .btn-cancel { background: #3a4556; color: #cbd5e0; }
+  .empty-state { color: rgba(255,255,255,0.6); }
+  .undo-bar { background: #4a5568; }
+}
+
+@media (max-width: 400px) {
+  .slot-btn { width: 33px; height: 33px; font-size: 11px; }
+  .slot-btn .sub-label { font-size: 6px; }
+  .date-number { width: 30px; height: 30px; font-size: 12px; margin-right: 6px; }
+  .date-text { font-size: 13px; }
+  .check-btn { width: 38px; height: 38px; font-size: 17px; }
+  .habit-info h3 { font-size: 16px; }
+  .icon-btn { width: 31px; height: 31px; font-size: 13px; }
+  .habit-stats { gap: 4px; }
+  .progress-text { font-size: 12px; }
+}
+@media (max-width: 360px) {
+  .slot-btn { width: 30px; height: 30px; font-size: 10px; }
+  .slot-btn .sub-label { display: none; }
+  .date-number { width: 26px; height: 26px; font-size: 11px; margin-right: 4px; }
+  .date-text { font-size: 12px; }
+  .icon-btn { width: 28px; height: 28px; font-size: 12px; }
+  .btn-small { font-size: 11px; padding: 8px 6px; min-width: 42px; }
+  .date-item { padding: 9px 10px; gap: 4px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>📋 每日打卡</h1>
+    <p>记录每一天的坚持</p>
+  </div>
+
+  <div class="toolbar">
+    <button class="toolbar-btn" onclick="exportData()">📤 导出备份</button>
+    <button class="toolbar-btn" onclick="document.getElementById('importFile').click()">📥 导入备份</button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+  </div>
+
+  <div id="habitList"></div>
+
+  <div class="add-card" onclick="openModal()">
+    <div class="icon">➕</div>
+    <div class="text">添加新打卡</div>
+  </div>
+
+  <div class="footer-hint">
+    💡 点击「添加到主屏幕」即可像 APP 一样使用<br>
+    🔒 长按日期可锁定单个日期 · 📝 点击备注图标记录心情<br>
+    🗑️ 短按删除 · 长按删除按钮切换锁定 · 📤 定期导出备份
+  </div>
+</div>
+
+<!-- 添加/编辑打卡弹窗 -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2 id="modalTitle">添加打卡</h2>
+    <div class="form-group">
+      <label>打卡名称</label>
+      <input type="text" id="habitName" placeholder="例如：每日运动" maxlength="20">
+    </div>
+    <div class="form-group">
+      <label>开始日期（第1次）</label>
+      <input type="date" id="startDate">
+    </div>
+    <div class="form-group">
+      <label>打卡总天数</label>
+      <input type="number" id="totalDays" placeholder="60" value="60" min="1" max="3650">
+    </div>
+    <div class="form-group">
+      <label>打卡频率</label>
+      <div class="mode-selector" id="modeSelector">
+        <div class="mode-option selected" data-value="single" onclick="selectMode('single')">
+          <span class="mode-label">每日1次</span>
+          <span class="mode-desc">每天签到一次</span>
+        </div>
+        <div class="mode-option" data-value="twice" onclick="selectMode('twice')">
+          <span class="mode-label">每日2次</span>
+          <span class="mode-desc">上午/下午</span>
+        </div>
+        <div class="mode-option" data-value="thrice" onclick="selectMode('thrice')">
+          <span class="mode-label">每日3次</span>
+          <span class="mode-desc">上午/中午/下午</span>
+        </div>
+      </div>
+    </div>
+    <div class="form-group" id="slotNamesGroup" style="display:none;">
+      <label>自定义时段名称（可选）</label>
+      <div class="slot-names" id="slotNamesInputs"></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+      <button class="btn btn-confirm" onclick="saveHabit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 备注弹窗 -->
+<div class="modal-overlay" id="noteModal">
+  <div class="modal">
+    <h2>添加备注</h2>
+    <div class="form-group">
+      <label id="noteDateLabel"></label>
+      <textarea id="noteInput" rows="3" placeholder="记录今天的感受…" maxlength="200"></textarea>
+      <div class="char-count"><span id="noteCharCount">0</span>/200</div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-cancel" onclick="closeNoteModal()">取消</button>
+      <button class="btn btn-confirm" onclick="saveNote()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============ 1. 常量与缓存 ============ */
+const STORAGE_KEY = 'checkin_habits_v5';
+const dateListCache = new Map(); // key: startDate|totalDays → dates[]
+
+function parseDateStr(str) {
+  const [y, m, d] = str.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatDate(date) {
+  return date.getFullYear() + '-' +
+    String(date.getMonth() + 1).padStart(2, '0') + '-' +
+    String(date.getDate()).padStart(2, '0');
+}
+
+function getSlotCount(mode) {
+  return mode === 'single' ? 1 : mode === 'twice' ? 2 : 3;
+}
+
+function getDefaultSlotNames(mode) {
+  if (mode === 'twice') return ['上午', '下午'];
+  if (mode === 'thrice') return ['上午', '中午', '下午'];
+  return [];
+}
+
+/* ============ 2. 数据层 ============ */
+function normalizeHabit(habit, index) {
+  if (!habit || typeof habit !== 'object') return null;
+  if (habit.dailyTwice === true && !habit.mode) habit.mode = 'twice';
+  if (!habit.mode || !['single', 'twice', 'thrice'].includes(habit.mode)) habit.mode = 'single';
+  if (typeof habit.name !== 'string' || !habit.name.trim()) habit.name = '未命名打卡';
+  if (typeof habit.startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(habit.startDate)) {
+    habit.startDate = formatDate(new Date());
+  }
+  habit.totalDays = Math.max(1, Math.min(3650, parseInt(habit.totalDays, 10) || 60));
+  if (!Array.isArray(habit.completedDates)) habit.completedDates = [];
+  if (!habit.completedCounts || typeof habit.completedCounts !== 'object') habit.completedCounts = {};
+  if (!Array.isArray(habit.lockedDates)) habit.lockedDates = [];
+  if (typeof habit.expanded !== 'boolean') habit.expanded = true;
+  if (typeof habit.masterLocked !== 'boolean') habit.masterLocked = false;
+  if (typeof habit.deleteLocked !== 'boolean') habit.deleteLocked = false;
+  if (!habit.notes || typeof habit.notes !== 'object') habit.notes = {};
+  if (!Array.isArray(habit.slotNames) || habit.slotNames.length !== getSlotCount(habit.mode)) {
+    habit.slotNames = getDefaultSlotNames(habit.mode);
+  }
+  if (habit.order === undefined || typeof habit.order !== 'number') habit.order = index;
+  if (!Array.isArray(habit.expandedMonths)) habit.expandedMonths = [];
+  delete habit.dailyTwice;
+  delete habit._dateCache;
+  return habit;
+}
+
+function getHabits() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  let habits = [];
+  try {
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) habits = parsed;
+    else if (parsed && typeof parsed === 'object') habits = [parsed];
+  } catch (e) {
+    console.warn('本地数据损坏，已重置:', e);
+    habits = [];
+  }
+
+  const todayStr = formatDate(new Date());
+  const todayMonth = todayStr.substring(0, 7);
+
+  habits = habits.map((h, i) => normalizeHabit(h, i)).filter(Boolean);
+
+  // 初始化展开月份（仅在首次渲染或没有记录时执行）
+  habits.forEach(h => {
+    if (!h.expandedMonths || h.expandedMonths.length === 0) {
+      h.expandedMonths = [];
+      const dates = getDates(h.startDate, h.totalDays);
+      const hasToday = dates.some(d => d.dateStr.startsWith(todayMonth));
+      if (hasToday) h.expandedMonths.push(todayMonth);
+      else if (dates.length > 0) h.expandedMonths.push(dates[0].dateStr.substring(0, 7));
+    }
+  });
+
+  habits.sort((a, b) => (a.order || 0) - (b.order || 0));
+  return habits;
+}
+
+function saveHabits(habits) {
+  habits.forEach((h, i) => { h.order = i; });
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(habits));
+  } catch (e) {
+    alert('保存失败，本地存储空间可能已满。请导出备份后清理旧数据。');
+    console.error(e);
+  }
+}
+
+/* ============ 3. 工具函数 ============ */
+function getDates(startDate, totalDays) {
+  const key = startDate + '|' + totalDays;
+  let dates = dateListCache.get(key);
+  if (!dates) {
+    dates = generateDateList(startDate, totalDays);
+    dateListCache.set(key, dates);
+    // LRU 限制：最多缓存 30 组
+    if (dateListCache.size > 30) {
+      const firstKey = dateListCache.keys().next().value;
+      dateListCache.delete(firstKey);
+    }
+  }
+  return dates;
+}
+
+function generateDateList(startDate, totalDays) {
+  const dates = [];
+  const [sy, sm, sd] = startDate.split('-').map(Number);
+  const start = new Date(sy, sm - 1, sd);
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  for (let i = 0; i < totalDays; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    dates.push({
+      dateStr: year + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0'),
+      display: month + '月' + day + '日',
+      weekday: weekdays[d.getDay()],
+      count: i + 1
+    });
+  }
+  return dates;
+}
+
+function getDayStatus(habit, dateStr) {
+  const mode = habit.mode || 'single';
+  if (mode === 'single') {
+    return [(habit.completedDates || []).includes(dateStr)];
+  }
+  const slotCount = getSlotCount(mode);
+  const val = (habit.completedCounts || {})[dateStr];
+  if (Array.isArray(val) && val.length === slotCount) return val;
+  return Array(slotCount).fill(false);
+}
+
+function setDayStatus(habit, dateStr, status) {
+  const mode = habit.mode || 'single';
+  if (mode === 'single') {
+    if (!habit.completedDates) habit.completedDates = [];
+    const idx = habit.completedDates.indexOf(dateStr);
+    const checked = !!status[0];
+    if (checked && idx === -1) habit.completedDates.push(dateStr);
+    else if (!checked && idx > -1) habit.completedDates.splice(idx, 1);
+  } else {
+    if (!habit.completedCounts) habit.completedCounts = {};
+    const slotCount = getSlotCount(mode);
+    let arr = habit.completedCounts[dateStr];
+    if (!Array.isArray(arr) || arr.length !== slotCount) arr = Array(slotCount).fill(false);
+    for (let i = 0; i < Math.min(status.length, slotCount); i++) arr[i] = !!status[i];
+    habit.completedCounts[dateStr] = arr;
+  }
+}
+
+function getDayCount(habit, dateStr) {
+  return getDayStatus(habit, dateStr).filter(Boolean).length;
+}
+
+function getPerDayCount(habit) {
+  return getSlotCount(habit.mode || 'single');
+}
+
+function getTotalCompletedCount(habit) {
+  const mode = habit.mode || 'single';
+  if (mode === 'single') return (habit.completedDates || []).length;
+  let total = 0;
+  const counts = habit.completedCounts || {};
+  for (const k in counts) {
+    const v = counts[k];
+    if (Array.isArray(v)) total += v.filter(Boolean).length;
+  }
+  return total;
+}
+
+function getTotalSlots(habit) {
+  return habit.totalDays * getPerDayCount(habit);
+}
+
+function getSlotLabel(habit, index) {
+  const names = habit.slotNames || getDefaultSlotNames(habit.mode);
+  return names[index] || '';
+}
+
+function getSlotShort(mode, index) {
+  if (mode === 'twice') return index === 0 ? '①' : '②';
+  if (mode === 'thrice') return ['①', '②', '③'][index] || '';
+  return '';
+}
+
+function getStreak(habit) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const perDay = getPerDayCount(habit);
+  const dates = getDates(habit.startDate, habit.totalDays);
+  const dateSet = new Set(dates.map(d => d.dateStr));
+  const isComplete = (ds) => dateSet.has(ds) && getDayCount(habit, ds) >= perDay;
+
+  let maxStreak = 0, streak = 0;
+  for (let i = 0; i < dates.length; i++) {
+    const d = dates[i];
+    if (parseDateStr(d.dateStr) > today) break;
+    if (isComplete(d.dateStr)) {
+      streak++;
+      if (streak > maxStreak) maxStreak = streak;
+    } else streak = 0;
+  }
+
+  let current = 0;
+  let cursor = new Date(today);
+  if (!isComplete(formatDate(cursor))) cursor.setDate(cursor.getDate() - 1);
+  for (let i = 0; i < 1000; i++) {
+    const ds = formatDate(cursor);
+    if (!dateSet.has(ds)) break;
+    if (isComplete(ds)) {
+      current++;
+      cursor.setDate(cursor.getDate() - 1);
+    } else break;
+  }
+  return { current, max: maxStreak };
+}
+
+function groupByMonth(dates) {
+  const groups = [];
+  let lastKey = '';
+  let g = null;
+  dates.forEach(d => {
+    const key = d.dateStr.substring(0, 7);
+    if (key !== lastKey) {
+      lastKey = key;
+      g = { monthKey: key, monthLabel: parseInt(key.substring(5), 10) + '月', dates: [] };
+      groups.push(g);
+    }
+    g.dates.push(d);
+  });
+  return groups;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+/* ============ 4. 长按检测（日期项） ============ */
+let longPressTimer;
+let isLongPress = false;
+let hasMoved = false;
+const LONG_PRESS_DURATION = 500;
+
+function startLongPress(callback) {
+  isLongPress = false;
+  hasMoved = false;
+  longPressTimer = setTimeout(() => { isLongPress = true; callback(); }, LONG_PRESS_DURATION);
+}
+function cancelLongPress() { clearTimeout(longPressTimer); }
+function handleTouchMove() { hasMoved = true; cancelLongPress(); }
+
+/* ============ 5. 删除按钮长按系统 ============ */
+let deletePressTimer = null;
+let deletePressTriggered = false;
+let deletePressTouchTime = -Infinity;
+
+function startDeletePress(habitIndex, event) {
+  if (event) {
+    event.stopPropagation();
+    if (event.type === 'touchstart') deletePressTouchTime = Date.now();
+    else if (event.type === 'mousedown' && Date.now() - deletePressTouchTime < 700) return;
+  }
+  deletePressTriggered = false;
+  clearTimeout(deletePressTimer);
+  deletePressTimer = setTimeout(() => {
+    deletePressTriggered = true;
+    toggleDeleteLock(habitIndex);
+  }, 550);
+}
+
+function cancelDeletePress(event) {
+  if (event) event.stopPropagation();
+  clearTimeout(deletePressTimer);
+}
+
+function endDeletePress(habitIndex, event) {
+  if (event) event.stopPropagation();
+  if (event && event.type === 'mouseup' && Date.now() - deletePressTouchTime < 700) return;
+  clearTimeout(deletePressTimer);
+  if (deletePressTriggered) { deletePressTriggered = false; return; }
+  const habits = getHabits();
+  if (!habits[habitIndex]) return;
+  if (habits[habitIndex].deleteLocked) {
+    alert('删除已锁定，长按可解锁');
+    return;
+  }
+  deleteHabit(habitIndex);
+}
+
+/* ============ 6. 交互操作 ============ */
+function toggleMasterLock(i, e) {
+  e.stopPropagation();
+  const h = getHabits();
+  h[i].masterLocked = !h[i].masterLocked;
+  saveHabits(h);
+  renderHabits();
+}
+
+function toggleDeleteLock(i) {
+  const h = getHabits();
+  h[i].deleteLocked = !h[i].deleteLocked;
+  saveHabits(h);
+  renderHabits();
+}
+
+function toggleDateLock(i, dateStr) {
+  const h = getHabits();
+  if (h[i].masterLocked) return;
+  if (!h[i].lockedDates) h[i].lockedDates = [];
+  const idx = h[i].lockedDates.indexOf(dateStr);
+  if (idx > -1) h[i].lockedDates.splice(idx, 1);
+  else h[i].lockedDates.push(dateStr);
+  saveHabits(h);
+  renderHabits();
+}
+
+function toggleExpand(i) {
+  const h = getHabits();
+  h[i].expanded = !h[i].expanded;
+  saveHabits(h);
+  renderHabits();
+}
+
+function toggleMonth(i, monthKey, e) {
+  e.stopPropagation();
+  const h = getHabits();
+  const months = h[i].expandedMonths || [];
+  const idx = months.indexOf(monthKey);
+  if (idx > -1) months.splice(idx, 1);
+  else months.push(monthKey);
+  h[i].expandedMonths = months;
+  saveHabits(h);
+  renderHabits();
+}
+
+function toggleSingleCheck(i, dateStr, e) {
+  if (e) e.stopPropagation();
+  const h = getHabits();
+  if (h[i].masterLocked) return;
+  if (h[i].lockedDates && h[i].lockedDates.includes(dateStr)) return;
+  if ((h[i].mode || 'single') !== 'single') return;
+  const status = getDayStatus(h[i], dateStr);
+  status[0] = !status[0];
+  setDayStatus(h[i], dateStr, status);
+  saveHabits(h);
+  renderHabits();
+}
+
+function toggleSlotCheck(i, dateStr, slotIndex, e) {
+  if (e) e.stopPropagation();
+  const h = getHabits();
+  if (h[i].masterLocked) return;
+  if (h[i].lockedDates && h[i].lockedDates.includes(dateStr)) return;
+  if ((h[i].mode || 'single') === 'single') return;
+  const status = getDayStatus(h[i], dateStr);
+  status[slotIndex] = !status[slotIndex];
+  setDayStatus(h[i], dateStr, status);
+  saveHabits(h);
+  renderHabits();
+}
+
+function onDateTouchStart(e, i, dateStr) {
+  const t = e.touches[0];
+  hasMoved = false;
+  startLongPress(() => toggleDateLock(i, dateStr));
+}
+
+function onDateTouchEnd(e, i, dateStr) {
+  cancelLongPress();
+  if (isLongPress || hasMoved) { isLongPress = false; hasMoved = false; return; }
+  const h = getHabits();
+  if ((h[i].mode || 'single') === 'single') {
+    const locked = h[i].masterLocked || (h[i].lockedDates || []).includes(dateStr);
+    if (!locked) toggleSingleCheck(i, dateStr, e);
+  }
+  isLongPress = false; hasMoved = false;
+}
+
+function checkAll(i, check) {
+  const h = getHabits();
+  if (h[i].masterLocked) return;
+  const locked = h[i].lockedDates || [];
+  const action = check ? '全部打卡' : '全部取消';
+  let msg = '确定要「' + action + '」？共 ' + h[i].totalDays + ' 天';
+  if (locked.length > 0) msg += '（已锁定 ' + locked.length + ' 天将跳过）';
+  msg += '。';
+  if (!confirm(msg)) return;
+
+  const dates = getDates(h[i].startDate, h[i].totalDays);
+  const mode = h[i].mode || 'single';
+  if (mode === 'single') {
+    if (check) h[i].completedDates = dates.filter(d => !locked.includes(d.dateStr)).map(d => d.dateStr);
+    else h[i].completedDates = (h[i].completedDates || []).filter(d => locked.includes(d));
+  } else {
+    if (!h[i].completedCounts) h[i].completedCounts = {};
+    const sc = getSlotCount(mode);
+    dates.forEach(d => {
+      if (!locked.includes(d.dateStr)) h[i].completedCounts[d.dateStr] = Array(sc).fill(check);
+    });
+  }
+  saveHabits(h);
+  renderHabits();
+}
+
+function deleteHabit(i) {
+  const h = getHabits();
+  if (!h[i]) return;
+  if (!confirm('确定要删除「' + h[i].name + '」吗？')) return;
+  const removed = h.splice(i, 1)[0];
+  saveHabits(h);
+  renderHabits();
+  showUndoBar(removed, i);
+}
+
+function addDays(i, days) {
+  const h = getHabits();
+  h[i].totalDays += days;
+  saveHabits(h);
+  renderHabits();
+}
+
+function moveHabit(i, delta, e) {
+  if (e) e.stopPropagation();
+  const h = getHabits();
+  const j = i + delta;
+  if (j < 0 || j >= h.length) return;
+  [h[i], h[j]] = [h[j], h[i]];
+  saveHabits(h);
+  renderHabits();
+}
+
+/* ============ 7. 撤销删除 ============ */
+let undoBarEl = null;
+let undoTimer = null;
+
+function showUndoBar(habit, index) {
+  if (undoBarEl) { undoBarEl.remove(); clearTimeout(undoTimer); }
+  const bar = document.createElement('div');
+  bar.className = 'undo-bar';
+  bar.innerHTML = '<span>已删除「' + escapeHtml(habit.name) + '」</span><button>撤销</button>';
+  bar.querySelector('button').onclick = () => {
+    const h = getHabits();
+    const idx = Math.min(index, h.length);
+    h.splice(idx, 0, habit);
+    saveHabits(h);
+    renderHabits();
+    bar.remove();
+    undoBarEl = null;
+    clearTimeout(undoTimer);
+  };
+  document.body.appendChild(bar);
+  undoBarEl = bar;
+  undoTimer = setTimeout(() => { bar.remove(); undoBarEl = null; }, 5000);
+}
+
+/* ============ 8. 备注 ============ */
+let noteHabitIndex = -1;
+let noteDateStr = '';
+
+function openNoteModal(i, dateStr) {
+  const h = getHabits();
+  noteHabitIndex = i;
+  noteDateStr = dateStr;
+  const d = parseDateStr(dateStr);
+  document.getElementById('noteDateLabel').textContent =
+    h[i].name + ' · ' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  const note = (h[i].notes && h[i].notes[dateStr]) || '';
+  document.getElementById('noteInput').value = note;
+  updateNoteCharCount();
+  document.getElementById('noteModal').classList.add('active');
+  setTimeout(() => document.getElementById('noteInput').focus(), 300);
+}
+
+function updateNoteCharCount() {
+  const v = document.getElementById('noteInput').value;
+  document.getElementById('noteCharCount').textContent = v.length;
+}
+
+function closeNoteModal() {
+  document.getElementById('noteModal').classList.remove('active');
+}
+
+function saveNote() {
+  const h = getHabits();
+  if (noteHabitIndex < 0 || !h[noteHabitIndex]) return;
+  if (!h[noteHabitIndex].notes) h[noteHabitIndex].notes = {};
+  const text = document.getElementById('noteInput').value.trim().slice(0, 200);
+  if (text) h[noteHabitIndex].notes[noteDateStr] = text;
+  else delete h[noteHabitIndex].notes[noteDateStr];
+  saveHabits(h);
+  closeNoteModal();
+  renderHabits();
+}
+
+document.getElementById('noteInput').addEventListener('input', updateNoteCharCount);
+
+/* ============ 9. 导入导出 ============ */
+function exportData() {
+  const data = localStorage.getItem(STORAGE_KEY) || '[]';
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '打卡备份_' + formatDate(new Date()) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const arr = JSON.parse(e.target.result);
+      if (!Array.isArray(arr)) throw new Error('文件格式不正确，应为 JSON 数组');
+      if (!confirm('导入 ' + arr.length + ' 个打卡项目？当前数据将被覆盖。')) return;
+      // 归一化后保存
+      const normalized = arr.map((h, i) => normalizeHabit(h, i)).filter(Boolean);
+      saveHabits(normalized);
+      dateListCache.clear();
+      renderHabits();
+      alert('导入成功，共 ' + normalized.length + ' 个项目。');
+    } catch (err) {
+      alert('导入失败：' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+/* ============ 10. 添加/编辑弹窗 ============ */
+let selectedMode = 'single';
+let editingIndex = -1;
+
+function selectMode(mode) {
+  selectedMode = mode;
+  document.querySelectorAll('.mode-option').forEach(el => {
+    el.classList.toggle('selected', el.dataset.value === mode);
+  });
+  renderSlotNameInputs();
+}
+
+function renderSlotNameInputs(presetNames) {
+  const group = document.getElementById('slotNamesGroup');
+  const wrap = document.getElementById('slotNamesInputs');
+  if (selectedMode === 'single') { group.style.display = 'none'; return; }
+  group.style.display = 'block';
+  const n = getSlotCount(selectedMode);
+  const defaults = presetNames && presetNames.length === n ? presetNames : getDefaultSlotNames(selectedMode);
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    const val = defaults[i] || '';
+    html += '<input type="text" id="slotName' + i + '" placeholder="' + getDefaultSlotNames(selectedMode)[i] + '" value="' + escapeHtml(val) + '" maxlength="6">';
+  }
+  wrap.innerHTML = html;
+}
+
+function openModal() {
+  editingIndex = -1;
+  document.getElementById('modalTitle').textContent = '添加打卡';
+  document.getElementById('habitName').value = '';
+  document.getElementById('totalDays').value = '60';
+  document.getElementById('startDate').value = formatDate(new Date());
+  selectMode('single');
+  renderSlotNameInputs();
+  document.getElementById('modal').classList.add('active');
+  setTimeout(() => document.getElementById('habitName').focus(), 300);
+}
+
+function openEditModal(i, e) {
+  if (e) e.stopPropagation();
+  const h = getHabits();
+  if (!h[i]) return;
+  editingIndex = i;
+  document.getElementById('modalTitle').textContent = '编辑打卡';
+  document.getElementById('habitName').value = h[i].name;
+  document.getElementById('startDate').value = h[i].startDate;
+  document.getElementById('totalDays').value = h[i].totalDays;
+  selectMode(h[i].mode);
+  renderSlotNameInputs(h[i].slotNames);
+  document.getElementById('modal').classList.add('active');
+  setTimeout(() => document.getElementById('habitName').focus(), 300);
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('active');
+  editingIndex = -1;
+}
+
+function saveHabit() {
+  const name = document.getElementById('habitName').value.trim();
+  const startDate = document.getElementById('startDate').value;
+  const totalDays = parseInt(document.getElementById('totalDays').value, 10) || 60;
+  const mode = selectedMode || 'single';
+
+  if (!name) { alert('请输入打卡名称'); return; }
+  if (!startDate) { alert('请选择开始日期'); return; }
+  if (totalDays < 1 || totalDays > 3650) { alert('总天数需在 1 至 3650 之间'); return; }
+
+  let slotNames = getDefaultSlotNames(mode);
+  if (mode !== 'single') {
+    const n = getSlotCount(mode);
+    slotNames = [];
+    for (let i = 0; i < n; i++) {
+      const el = document.getElementById('slotName' + i);
+      const v = el ? el.value.trim().slice(0, 6) : '';
+      slotNames.push(v || getDefaultSlotNames(mode)[i]);
+    }
+  }
+
+  const habits = getHabits();
+  if (editingIndex >= 0 && habits[editingIndex]) {
+    // 编辑模式：保留打卡数据，更新其它字段
+    const old = habits[editingIndex];
+    old.name = name;
+    old.startDate = startDate;
+    old.totalDays = totalDays;
+    old.mode = mode;
+    old.slotNames = slotNames;
+    // 若总天数缩短，清理超出范围的数据
+    const validDates = new Set(getDates(startDate, totalDays).map(d => d.dateStr));
+    if (mode === 'single') {
+      old.completedDates = (old.completedDates || []).filter(d => validDates.has(d));
+    } else {
+      const newCounts = {};
+      for (const k in (old.completedCounts || {})) {
+        if (validDates.has(k)) newCounts[k] = old.completedCounts[k];
+      }
+      old.completedCounts = newCounts;
+    }
+    old.lockedDates = (old.lockedDates || []).filter(d => validDates.has(d));
+    const newNotes = {};
+    for (const k in (old.notes || {})) {
+      if (validDates.has(k)) newNotes[k] = old.notes[k];
+    }
+    old.notes = newNotes;
+    old.expandedMonths = [];
+    saveHabits(habits);
+    closeModal();
+    renderHabits();
+  } else {
+    // 新增模式
+    habits.push({
+      name, startDate, totalDays, mode, slotNames,
+      completedDates: [], completedCounts: {}, notes: {},
+      lockedDates: [], masterLocked: false, deleteLocked: false,
+      expanded: true, expandedMonths: [], order: habits.length
+    });
+    saveHabits(habits);
+    closeModal();
+    renderHabits();
+  }
+}
+
+document.getElementById('modal').addEventListener('click', function (e) {
+  if (e.target === this) closeModal();
+});
+document.getElementById('noteModal').addEventListener('click', function (e) {
+  if (e.target === this) closeNoteModal();
+});
+
+/* ============ 11. 渲染 ============ */
+function renderHabits(preserveScroll) {
+  if (preserveScroll === undefined) preserveScroll = true;
+  const scrollY = preserveScroll ? window.scrollY : 0;
+
+  const habits = getHabits();
+  const container = document.getElementById('habitList');
+
+  if (habits.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">📝</div><p>还没有打卡项目<br>点击下方添加一个吧</p></div>';
+    if (preserveScroll) window.scrollTo(0, scrollY);
+    return;
+  }
+
+  container.innerHTML = habits.map((habit, habitIndex) => {
+    const mode = habit.mode || 'single';
+    const dates = getDates(habit.startDate, habit.totalDays);
+    const totalSlots = getTotalSlots(habit);
+    const completedCount = getTotalCompletedCount(habit);
+    const progress = totalSlots > 0 ? Math.round(completedCount / totalSlots * 100) : 0;
+    const isExpanded = habit.expanded || false;
+    const isMasterLocked = habit.masterLocked || false;
+    const isDeleteLocked = habit.deleteLocked || false;
+    const lockedDates = habit.lockedDates || [];
+    const streak = getStreak(habit);
+    const isArchived = progress >= 100 && totalSlots > 0;
+
+    const perDayLabel = mode === 'single' ? '每日1次' : mode === 'twice' ? '每日2次' : '每日3次';
+    const modeIcon = mode === 'single' ? '' : mode === 'twice' ? '🔄' : '🔁';
+
+    return `
+      <div class="card ${isArchived ? 'archived' : ''}">
+        <div class="habit-header" onclick="toggleExpand(${habitIndex})">
+          <div class="habit-info">
+            <h3>${escapeHtml(habit.name)} ${modeIcon} ${isArchived ? '✅' : ''}</h3>
+            <div class="date-info">${habit.startDate} 开始 · ${habit.totalDays}天 · ${perDayLabel}</div>
+            <div class="streak-info">🔥 连续 ${streak.current} 天 · 最长 ${streak.max} 天</div>
+            <div class="progress-bar-small">
+              <div class="progress-fill-small" style="width:${Math.min(progress, 100)}%"></div>
+            </div>
+          </div>
+          <div class="habit-stats">
+            <span class="progress-text">${completedCount}/${totalSlots}</span>
+            <button class="icon-btn ${isMasterLocked ? 'locked' : ''}"
+                    onclick="toggleMasterLock(${habitIndex}, event)"
+                    title="${isMasterLocked ? '已锁定，点击解锁' : '锁定全部'}">${isMasterLocked ? '🔒' : '🔓'}</button>
+            <button class="icon-btn" onclick="openEditModal(${habitIndex}, event)" title="编辑">✏️</button>
+            <button class="icon-btn delete-btn ${isDeleteLocked ? 'locked' : ''}"
+                    onclick="event.stopPropagation()"
+                    ontouchstart="startDeletePress(${habitIndex}, event)"
+                    ontouchend="endDeletePress(${habitIndex}, event)"
+                    ontouchmove="cancelDeletePress(event)"
+                    onmousedown="startDeletePress(${habitIndex}, event)"
+                    onmouseup="endDeletePress(${habitIndex}, event)"
+                    onmouseleave="cancelDeletePress(event)"
+                    title="${isDeleteLocked ? '已锁定，长按解锁' : '短按删除，长按锁定'}">${isDeleteLocked ? '🔒' : '🗑️'}</button>
+            <span class="arrow ${isExpanded ? 'expanded' : ''}">▼</span>
+          </div>
+        </div>
+
+        <div class="date-list ${isExpanded ? 'expanded' : ''}">
+          <div class="long-press-hint">💡 长按日期可锁定/解锁 · 点击 📝 添加备注</div>
+          ${renderDateSection(habit, habitIndex, dates, mode, lockedDates, isMasterLocked)}
+          <div class="chart-wrap">
+            <div class="chart-title">📊 最近30天完成情况</div>
+            <canvas class="chart-canvas" data-index="${habitIndex}" width="400" height="60"></canvas>
+          </div>
+          <div class="habit-footer">
+            <button class="btn-small btn-check-all" onclick="checkAll(${habitIndex}, true)" ${isMasterLocked ? 'disabled' : ''}>全部打卡</button>
+            <button class="btn-small btn-uncheck-all" onclick="checkAll(${habitIndex}, false)" ${isMasterLocked ? 'disabled' : ''}>全部取消</button>
+          </div>
+          <div class="habit-footer add-days-footer">
+            <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 7)">+7天</button>
+            <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 30)">+30天</button>
+            <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 1)">+1天</button>
+            <button class="btn-small btn-move" onclick="moveHabit(${habitIndex}, -1, event)" ${habitIndex === 0 ? 'disabled' : ''}>上移</button>
+            <button class="btn-small btn-move" onclick="moveHabit(${habitIndex}, 1, event)" ${habitIndex === habits.length - 1 ? 'disabled' : ''}>下移</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (preserveScroll) window.scrollTo(0, scrollY);
+  requestAnimationFrame(drawCharts);
+}
+
+function renderDateSection(habit, habitIndex, dates, mode, lockedDates, isMasterLocked) {
+  const useMonthGroup = habit.totalDays > 60;
+  if (!useMonthGroup) {
+    return dates.map(d => renderDateItem(habit, habitIndex, d, mode, lockedDates, isMasterLocked)).join('');
+  }
+  const groups = groupByMonth(dates);
+  const expandedMonths = habit.expandedMonths || [];
+  return groups.map(g => {
+    const isOpen = expandedMonths.includes(g.monthKey);
+    // 延迟渲染：折叠的月份不生成子项 DOM
+    const bodyContent = isOpen
+      ? g.dates.map(d => renderDateItem(habit, habitIndex, d, mode, lockedDates, isMasterLocked)).join('')
+      : '';
+    return `
+      <div class="month-group">
+        <div class="month-header" onclick="toggleMonth(${habitIndex}, '${g.monthKey}', event)">
+          <span>${g.monthLabel}（${g.dates.length} 天）</span>
+          <span class="month-arrow">${isOpen ? '▼' : '▶'}</span>
+        </div>
+        <div class="month-body" style="${isOpen ? '' : 'display:none'}">${bodyContent}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderDateItem(habit, habitIndex, d, mode, lockedDates, isMasterLocked) {
+  const isLocked = isMasterLocked || lockedDates.includes(d.dateStr);
+  const status = getDayStatus(habit, d.dateStr);
+  const dayCount = status.filter(Boolean).length;
+  const hasNote = habit.notes && habit.notes[d.dateStr];
+  const noteIcon = hasNote ? '📝' : '📄';
+
+  const noteBtn = `<button class="note-btn ${hasNote ? 'has-note' : ''}"
+      ontouchstart="event.stopPropagation()"
+      ontouchend="event.stopPropagation()"
+      onmousedown="event.stopPropagation()"
+      onclick="event.stopPropagation(); openNoteModal(${habitIndex}, '${d.dateStr}')"
+      title="${hasNote ? escapeHtml(hasNote) : '添加备注'}">${noteIcon}</button>`;
+
+  const baseAttrs = `
+    data-date="${d.dateStr}"
+    ontouchstart="onDateTouchStart(event, ${habitIndex}, '${d.dateStr}')"
+    ontouchmove="handleTouchMove()"
+    ontouchend="onDateTouchEnd(event, ${habitIndex}, '${d.dateStr}')"
+    onmousedown="startLongPress(() => toggleDateLock(${habitIndex}, '${d.dateStr}'))"
+    onmouseup="cancelLongPress()"
+    onmouseleave="cancelLongPress()"`;
+
+  if (mode === 'single') {
+    const checked = status[0] || false;
+    return `
+      <div class="date-item ${isLocked ? 'locked' : ''}" ${baseAttrs}>
+        <div class="date-number ${isLocked ? 'locked' : ''}">${d.count}</div>
+        <div class="date-text">${d.display}${noteBtn}</div>
+        <div class="check-btn ${checked ? 'checked' : ''} ${isLocked ? 'locked' : ''}"
+             onclick="if(!${isLocked}) toggleSingleCheck(${habitIndex}, '${d.dateStr}', event)">
+          ${checked ? '✓' : ''}
+        </div>
+        ${isLocked ? '<div class="date-lock-icon">🔒</div>' : ''}
+      </div>`;
+  }
+
+  const slotCount = getSlotCount(mode);
+  const progressLabel = dayCount === slotCount ? '✅' : (dayCount > 0 ? dayCount + '/' + slotCount : '');
+  const slots = Array.from({ length: slotCount }, (_, i) => {
+    const checked = status[i] || false;
+    const label = getSlotShort(mode, i);
+    const sub = getSlotLabel(habit, i);
+    return `<button class="slot-btn ${checked ? 'checked' : ''} ${isLocked ? 'locked' : ''}"
+        onclick="if(!${isLocked}) toggleSlotCheck(${habitIndex}, '${d.dateStr}', ${i}, event)"
+        title="${escapeHtml(sub)}">
+        <span class="label">${label}</span><span class="sub-label">${escapeHtml(sub)}</span>
+      </button>`;
+  }).join('');
+
+  return `
+    <div class="date-item multi-mode ${isLocked ? 'locked' : ''}" ${baseAttrs}>
+      <div class="date-number ${isLocked ? 'locked' : ''}">${d.count}</div>
+      <div class="date-text">${d.display}${noteBtn}</div>
+      <div class="date-progress ${dayCount === slotCount ? 'done' : ''}">${progressLabel}</div>
+      <div class="slot-group">${slots}</div>
+      ${isLocked ? '<div class="date-lock-icon">🔒</div>' : ''}
+    </div>`;
+}
+
+/* ============ 12. Canvas 图表 ============ */
+function drawCharts() {
+  const habits = getHabits();
+  const canvases = document.querySelectorAll('.chart-canvas');
+  const items = [];
+  // 先统一读取尺寸，避免多次触发布局
+  canvases.forEach(c => {
+    const rect = c.getBoundingClientRect();
+    if (rect.width > 0) {
+      const i = parseInt(c.dataset.index, 10);
+      if (habits[i]) items.push({ canvas: c, rect, habit: habits[i] });
+    }
+  });
+  // 再统一绘制
+  items.forEach(it => drawChart(it.canvas, it.rect, it.habit));
+}
+
+function drawChart(canvas, rect, habit) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = rect.width, H = rect.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const emptyColor = isDark ? '#3a4556' : '#e6e6e6';
+
+  const perDay = getPerDayCount(habit);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    days.push(formatDate(d));
+  }
+
+  const barW = W / 30;
+  days.forEach((ds, i) => {
+    const count = getDayCount(habit, ds);
+    const ratio = Math.min(count / perDay, 1);
+    const barH = ratio * (H - 4);
+    const x = i * barW;
+    const y = H - barH;
+    if (ratio === 0) ctx.fillStyle = emptyColor;
+    else if (ratio >= 1) ctx.fillStyle = '#4cd964';
+    else ctx.fillStyle = '#ffcc00';
+    ctx.fillRect(x + 1, y, barW - 2, Math.max(barH, 2));
+  });
+}
+
+/* ============ 13. 初始化 ============ */
+function initDefaultHabit() {
+  const habits = getHabits();
+  if (habits.length === 0) {
+    habits.push({
+      name: '我的打卡',
+      startDate: formatDate(new Date()),
+      totalDays: 60,
+      mode: 'single',
+      slotNames: [],
+      completedDates: [], completedCounts: {}, notes: {},
+      lockedDates: [], masterLocked: false, deleteLocked: false,
+      expanded: true, expandedMonths: [], order: 0
+    });
+    saveHabits(habits);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  initDefaultHabit();
+  renderHabits(false);
+
+  // 存储空间检查
+  setTimeout(() => {
+    const data = localStorage.getItem(STORAGE_KEY) || '';
+    const bytes = new Blob([data]).size;
+    if (bytes > 4 * 1024 * 1024) {
+      alert('本地存储已接近上限（约 5MB），建议导出备份后删除部分旧打卡。');
+    }
+  }, 800);
+});
+
+// 深色模式切换时重绘图表
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    drawCharts();
+  });
+}
+</script>
+</body>
+</html>
