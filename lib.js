@@ -155,7 +155,7 @@ function normalizeItem(it) {
   const text = typeof it.text === 'string' ? it.text.trim().slice(0, LIST_ITEM_MAX) : '';
   if (!text) return null;
   return {
-    id: (typeof it.id === 'string' && it.id) ? it.id : newItemId(),
+    id: (typeof it.id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(it.id)) ? it.id : newItemId(),
     text,
     done: !!it.done,
     locked: !!it.locked,
