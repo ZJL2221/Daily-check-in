@@ -93,7 +93,7 @@
 
     <!-- 记录清单专属提示 -->
     <div id="listHint" style="display:none;">
-      <div class="list-hint-box">保存后在卡片底部输入即可一条条添加，每条都能打勾、修改、删除。</div>
+      <div class="list-hint-box">保存后在卡片底部点「＋ 添加一条」，逐条记录；每条都能打勾、改字、删除。</div>
     </div>
 
     <div class="modal-btns">
@@ -115,6 +115,23 @@
     <div class="modal-btns">
       <button class="btn btn-cancel" onclick="closeNoteModal()">取消</button>
       <button class="btn btn-confirm" onclick="saveNote()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 添加清单条目弹窗（仅记录清单） -->
+<div class="modal-overlay" id="itemModal">
+  <div class="modal">
+    <h2>添加一条</h2>
+    <div class="form-group">
+      <label id="itemModalLabel"></label>
+      <input type="text" id="itemInput" maxlength="60" placeholder="输入内容…">
+      <div class="char-count"><span id="itemCharCount">0</span>/60</div>
+    </div>
+    <div class="item-modal-hint" id="itemModalHint">保存后可以接着加下一条</div>
+    <div class="modal-btns">
+      <button class="btn btn-cancel" id="itemDone">完成</button>
+      <button class="btn btn-confirm" id="itemSave">保存</button>
     </div>
   </div>
 </div>
@@ -174,8 +191,8 @@
   • 长按整行：锁定 / 解锁该条
   • 右侧 ✏️：改文字，改完按回车保存
   • 右侧 🗑️：删除该条（会先问一次）
-  • 底部输入框：输入后按回车，或点右边的「添加」
-    手机上直接点「添加」按钮最省事，加完可以接着记下一条
+  • 卡片底部「＋ 添加一条」：弹出输入框，输入后点「保存」
+    保存后弹窗不关，可以接着记下一条；记完点「完成」收起
 
 🔒 通用锁定
   • 长按日期或清单条目：锁定 / 解锁单项

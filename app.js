@@ -659,27 +659,48 @@ function startItemEdit(i, itemId, e) {
     input.addEventListener(t, ev => ev.stopPropagation()));
 }
 
-/* 底部输入框：回车 或 点「添加」按钮 都能加一条，加完重新聚焦以便连着加 */
-function addItemFromInput(i) {
-  const inp = document.querySelector('.list-add-input[data-habit="' + i + '"]');
-  if (!inp) return;
-  const v = inp.value.trim();
-  if (!v) { inp.focus(); return; }
+/* 添加一条：点卡片底部的按钮 → 弹出居中输入框。
+   手机上这样键盘不会挤压卡片布局，也不用先滚到列表底部去点输入框。 */
+let itemModalHabitIndex = -1;
+let itemModalSavedCount = 0;
+
+function openItemModal(i) {
   const h = getHabits();
   if (!h[i]) return;
+  if (h[i].masterLocked) return;
+  itemModalHabitIndex = i;
+  itemModalSavedCount = 0;
+  document.getElementById('itemModalLabel').textContent = '添加到「' + h[i].name + '」';
+  document.getElementById('itemInput').value = '';
+  document.getElementById('itemCharCount').textContent = '0';
+  document.getElementById('itemModalHint').textContent = '保存后可以接着加下一条';
+  document.getElementById('itemModal').classList.add('active');
+  setTimeout(() => document.getElementById('itemInput').focus(), 320);
+}
+
+function closeItemModal() {
+  document.getElementById('itemModal').classList.remove('active');
+  itemModalHabitIndex = -1;
+  itemModalSavedCount = 0;
+}
+
+function saveItemModal() {
+  const h = getHabits();
+  const i = itemModalHabitIndex;
+  if (i < 0 || !h[i]) { closeItemModal(); return; }
+  const inp = document.getElementById('itemInput');
+  const v = inp.value.trim();
+  if (!v) { inp.focus(); return; }
   addListItem(h[i], v);
   saveHabits(h);
   renderHabits();
-  const next = document.querySelector('.list-add-input[data-habit="' + i + '"]');
-  if (next) next.focus();
-}
-
-function onAddItemKey(ev, i) {
-  // 中文输入法敲回车是在确认候选词（isComposing / keyCode 229），此时不能当提交
-  if (ev.isComposing || ev.keyCode === 229) return;
-  if (ev.key !== 'Enter') return;
-  ev.preventDefault();
-  addItemFromInput(i);
+  // 故意不关弹窗：清空并保持焦点，方便接着记下一条；点「完成」才收起来
+  inp.value = '';
+  document.getElementById('itemCharCount').textContent = '0';
+  itemModalSavedCount++;
+  document.getElementById('itemModalHint').textContent =
+    '已添加 ' + itemModalSavedCount + ' 条，可继续输入';
+  inp.focus();
 }
 
 /* ---------- 导入导出 ---------- */
@@ -925,12 +946,9 @@ function saveHabit() {
     saveHabits(habits);
     closeModal();
     renderHabits();
-    // 新建的清单直接把光标送到添加框，省一次点击
+    // 新建的清单直接把「添加一条」弹窗打开，省一次点击
     if (editingIndex < 0) {
-      setTimeout(() => {
-        const inp = document.querySelector('.list-add-input[data-habit="' + (habits.length - 1) + '"]');
-        if (inp) inp.focus();
-      }, 320);
+      setTimeout(() => openItemModal(habits.length - 1), 300);
     }
     return;
   }
@@ -1111,14 +1129,8 @@ function renderListCard(habit, habitIndex, total) {
         <div class="long-press-hint">💡 点条目打勾 · 长按锁定 · 右侧可改字或删除</div>
         <div class="list-body">${rows}</div>
         <div class="list-add-row">
-          <span class="list-add-plus">＋</span>
-          <input class="list-add-input" data-habit="${habitIndex}" type="text"
-                 maxlength="${LIST_ITEM_MAX}" placeholder="输入后按回车，或点右边添加"
-                 ${isMasterLocked ? 'disabled' : ''}
-                 onkeydown="onAddItemKey(event, ${habitIndex})"
-                 onclick="event.stopPropagation()">
-          <button class="list-add-btn" ${isMasterLocked ? 'disabled' : ''}
-                  onclick="event.stopPropagation(); addItemFromInput(${habitIndex})">添加</button>
+          <button class="list-add-open" ${isMasterLocked ? 'disabled' : ''}
+                  onclick="event.stopPropagation(); openItemModal(${habitIndex})">＋ 添加一条</button>
         </div>
         <div class="habit-footer">
           <button class="btn-small btn-export-one" onclick="exportSingleHabit(${habitIndex}, event)">📤 导出此项</button>
@@ -1303,6 +1315,23 @@ function closeHelpModal() {
 /* ---------- 事件绑定 ---------- */
 document.getElementById('noteInput').addEventListener('input', updateNoteCharCount);
 
+/* 添加清单条目的弹窗 */
+document.getElementById('itemInput').addEventListener('input', function () {
+  document.getElementById('itemCharCount').textContent = this.value.length;
+});
+document.getElementById('itemInput').addEventListener('keydown', function (ev) {
+  // 中文输入法敲回车是确认候选词，不能当提交
+  if (ev.isComposing || ev.keyCode === 229) return;
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  saveItemModal();
+});
+document.getElementById('itemDone').onclick = closeItemModal;
+document.getElementById('itemSave').onclick = saveItemModal;
+document.getElementById('itemModal').addEventListener('click', function (e) {
+  if (e.target === this) closeItemModal();
+});
+
 document.getElementById('modal').addEventListener('click', function (e) {
   if (e.target === this) closeModal();
 });
@@ -1334,6 +1363,7 @@ document.getElementById('importModal').addEventListener('click', function (e) {
 function closeTopModal() {
   if (document.getElementById('confirmModal').classList.contains('active')) { closeConfirm(false); return true; }
   if (document.getElementById('importModal').classList.contains('active')) { closeImportChoice(null); return true; }
+  if (document.getElementById('itemModal').classList.contains('active')) { closeItemModal(); return true; }
   if (document.getElementById('noteModal').classList.contains('active')) { closeNoteModal(); return true; }
   if (document.getElementById('modal').classList.contains('active')) { closeModal(); return true; }
   if (document.getElementById('exportModal').classList.contains('active')) { closeExportModal(); return true; }

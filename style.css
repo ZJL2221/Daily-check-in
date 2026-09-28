@@ -197,25 +197,21 @@ body {
 .item-lock-icon { font-size: 12px; flex-shrink: 0; }
 
 .list-add-row {
-  display: flex; align-items: center; gap: 8px;
   padding: 12px 14px; border-top: 1px solid #eee; background: #fafafa;
 }
-.list-add-plus { color: #667eea; font-size: 17px; font-weight: 700; flex-shrink: 0; }
-.list-add-input {
-  flex: 1; padding: 10px 12px; border: 2px solid #eee; border-radius: 10px;
-  font-size: 14px; font-family: inherit; background: white; min-width: 0;
+.list-add-open {
+  width: 100%; padding: 12px; border: 2px dashed #c7d2fe; border-radius: 10px;
+  background: white; color: #667eea; font-size: 14px; font-weight: 600;
+  font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
-.list-add-input:focus { outline: none; border-color: #667eea; }
-.list-add-input:disabled { opacity: 0.5; }
+.list-add-open:active { background: #eef0ff; }
+.list-add-open:disabled {
+  opacity: 0.45; cursor: not-allowed; border-color: #e5e5e5; color: #bbb;
+}
 
-.list-add-btn {
-  flex-shrink: 0; padding: 10px 16px; border: none; border-radius: 10px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white; font-size: 13px; font-weight: 600; font-family: inherit;
-  cursor: pointer; -webkit-tap-highlight-color: transparent;
+.item-modal-hint {
+  font-size: 12px; color: #999; text-align: center; margin-top: 10px;
 }
-.list-add-btn:active { opacity: 0.85; }
-.list-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .habit-footer {
   display: flex; padding: 10px 14px; border-top: 1px solid #eee;
@@ -378,8 +374,10 @@ body {
   .item-btn { background: #3a4556; color: #cbd5e0; }
   .item-btn.item-del { background: #4a2c2c; }
   .list-add-row { background: #252d3d; border-top-color: #3a4556; }
-  .list-add-plus { color: #9aa8f0; }
-  .list-add-input { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+  .list-add-open { background: #2d3748; border-color: #3f4b8a; color: #9aa8f0; }
+  .list-add-open:active { background: #2a3560; }
+  .list-add-open:disabled { color: #718096; border-color: #4a5568; }
+  .item-modal-hint { color: #718096; }
   .habit-footer { background: #252d3d; border-top-color: #3a4556; }
   .btn-uncheck-all { background: #3a4556; color: #cbd5e0; }
   .btn-add-days { background: #1e3a5f; color: #63b3ed; }
