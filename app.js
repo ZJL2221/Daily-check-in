@@ -171,6 +171,7 @@ let deletePressTimer = null;
 let deletePressTriggered = false;
 let deletePressActive = false;
 let deletePressTouchTime = -Infinity;
+let deletePressHabit = null;   // 按下时记住的目标对象，确认前若列表变动也不会删错
 
 function startDeletePress(habitIndex, event) {
   if (event) {
@@ -185,6 +186,7 @@ function startDeletePress(habitIndex, event) {
   if (deletePressActive) return;
   deletePressActive = true;
   deletePressTriggered = false;
+  deletePressHabit = getHabits()[habitIndex] || null;
   clearTimeout(deletePressTimer);
   deletePressTimer = setTimeout(() => {
     deletePressTriggered = true;
@@ -212,14 +214,17 @@ function endDeletePress(habitIndex, event) {
   clearTimeout(deletePressTimer);
   if (deletePressTriggered) { deletePressTriggered = false; return; }
   const habits = getHabits();
-  if (!habits[habitIndex]) return;
-  if (habits[habitIndex].deleteLocked) {
+  const target = (deletePressHabit && habits.indexOf(deletePressHabit) !== -1)
+    ? habits.indexOf(deletePressHabit)
+    : habitIndex;
+  if (!habits[target]) return;
+  if (habits[target].deleteLocked) {
     alert('删除已锁定，长按可解锁');
     return;
   }
   // 关键修复 2：延迟 120ms 再弹 confirm，让整段鼠标 / 触摸事件序列先走完
   setTimeout(() => {
-    deleteHabit(habitIndex);
+    deleteHabit(target, deletePressHabit);
   }, 120);
 }
 
@@ -301,6 +306,7 @@ function toggleSlotCheck(i, dateStr, slotIndex, e) {
 let longPressTimer = null;
 let isLongPress = false;
 let hasMoved = false;
+let lastTouchEndAt = 0;   // 最近一次 touchend 时间戳（替代原来的 window._lastTouchEnd）
 const LONG_PRESS_DURATION = 500;
 
 function startLongPress(callback) {
@@ -319,7 +325,7 @@ function onDateTouchStart(e, i, dateStr) {
 
 function onDateTouchEnd(e, i, dateStr) {
   cancelLongPress();
-  window._lastTouchEnd = Date.now();
+  lastTouchEndAt = Date.now();
   if (isLongPress || hasMoved) { isLongPress = false; hasMoved = false; return; }
   const h = getHabits();
   if (h[i] && (h[i].mode || 'single') === 'single') {
@@ -332,7 +338,7 @@ function onDateTouchEnd(e, i, dateStr) {
 /* ---------- 桌面端点击空白区域（单次模式打卡） ---------- */
 function onDateClick(e, i, dateStr) {
   // 触摸后的合成 click，忽略（800ms 内）
-  if (Date.now() - (window._lastTouchEnd || 0) < 800) return;
+  if (Date.now() - lastTouchEndAt < 800) return;
 
   const h = getHabits();
   const target = e.target;
@@ -374,14 +380,17 @@ async function checkAll(i, check) {
   renderHabits();
 }
 
-async function deleteHabit(i) {
+async function deleteHabit(i, habitRef) {
   const h = getHabits();
-  if (!h[i]) return;
-  if (!(await showConfirm('确定要删除「' + h[i].name + '」吗？', '删除项目'))) return;
-  const removed = h.splice(i, 1)[0];
+  // 优先按对象引用定位：长按到确认之间项目可能被移动或删除，纯索引会张冠李戴
+  let idx = habitRef ? h.indexOf(habitRef) : -1;
+  if (idx === -1) idx = i;
+  if (!h[idx]) return;
+  if (!(await showConfirm('确定要删除「' + h[idx].name + '」吗？', '删除项目'))) return;
+  const removed = h.splice(idx, 1)[0];
   saveHabits(h);
   renderHabits();
-  showUndoBar(removed, i);
+  showUndoBar(removed, idx);
 }
 
 /* ---------- 天数增减（仅每日打卡） ---------- */
@@ -653,7 +662,8 @@ function startItemEdit(i, itemId, e) {
     if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
     else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
   });
-  input.addEventListener('blur', () => commit(true));
+  // 失焦 = 放弃修改（避免只是滑动/点别处就把内容改了）：只有回车才算保存
+  input.addEventListener('blur', () => commit(false));
   // 别让输入框里的点击被整行的"打勾"处理吃掉
   ['click', 'mousedown', 'touchstart', 'touchmove', 'touchend'].forEach(t =>
     input.addEventListener(t, ev => ev.stopPropagation()));

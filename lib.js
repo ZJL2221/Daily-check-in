@@ -298,15 +298,24 @@ function migrateModeData(habit, newMode, newSlotNames) {
   habit.completedCounts = counts;
 }
 
+/* 稳定序列化：递归排序对象键，避免「导出→手改→再导入」时因键序不同被误判为不同项目 */
+function stableStringify(v) {
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  if (v && typeof v === 'object') {
+    return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+  }
+  return JSON.stringify(v === undefined ? null : v);
+}
+
 /* 导入时判断"这条记录是否已存在"，忽略 order 等易变字段 */
 function habitSignature(h) {
   if (getHabitType(h) === TYPE_LIST) {
-    return JSON.stringify([
+    return stableStringify([
       TYPE_LIST, h.name,
       (h.items || []).map(it => [it.text, !!it.done])
     ]);
   }
-  return JSON.stringify([
+  return stableStringify([
     TYPE_DAILY, h.name, h.startDate, h.totalDays, h.mode,
     h.slotNames || [], h.completedDates || [],
     h.completedCounts || {}, h.notes || {}
