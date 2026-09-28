@@ -208,6 +208,15 @@ body {
 .list-add-input:focus { outline: none; border-color: #667eea; }
 .list-add-input:disabled { opacity: 0.5; }
 
+.list-add-btn {
+  flex-shrink: 0; padding: 10px 16px; border: none; border-radius: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white; font-size: 13px; font-weight: 600; font-family: inherit;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.list-add-btn:active { opacity: 0.85; }
+.list-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .habit-footer {
   display: flex; padding: 10px 14px; border-top: 1px solid #eee;
   background: #fafafa; gap: 6px; flex-wrap: wrap;

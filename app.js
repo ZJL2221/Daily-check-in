@@ -659,19 +659,27 @@ function startItemEdit(i, itemId, e) {
     input.addEventListener(t, ev => ev.stopPropagation()));
 }
 
-/* 底部输入框：回车添加一条，重新聚焦以便连着加 */
-function onAddItemKey(ev, i) {
-  if (ev.key !== 'Enter') return;
-  ev.preventDefault();
-  const v = ev.target.value.trim();
-  if (!v) return;
+/* 底部输入框：回车 或 点「添加」按钮 都能加一条，加完重新聚焦以便连着加 */
+function addItemFromInput(i) {
+  const inp = document.querySelector('.list-add-input[data-habit="' + i + '"]');
+  if (!inp) return;
+  const v = inp.value.trim();
+  if (!v) { inp.focus(); return; }
   const h = getHabits();
   if (!h[i]) return;
   addListItem(h[i], v);
   saveHabits(h);
   renderHabits();
-  const inp = document.querySelector('.list-add-input[data-habit="' + i + '"]');
-  if (inp) inp.focus();
+  const next = document.querySelector('.list-add-input[data-habit="' + i + '"]');
+  if (next) next.focus();
+}
+
+function onAddItemKey(ev, i) {
+  // 中文输入法敲回车是在确认候选词（isComposing / keyCode 229），此时不能当提交
+  if (ev.isComposing || ev.keyCode === 229) return;
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  addItemFromInput(i);
 }
 
 /* ---------- 导入导出 ---------- */
@@ -1105,10 +1113,12 @@ function renderListCard(habit, habitIndex, total) {
         <div class="list-add-row">
           <span class="list-add-plus">＋</span>
           <input class="list-add-input" data-habit="${habitIndex}" type="text"
-                 maxlength="${LIST_ITEM_MAX}" placeholder="输入后按回车添加一条"
+                 maxlength="${LIST_ITEM_MAX}" placeholder="输入后按回车，或点右边添加"
                  ${isMasterLocked ? 'disabled' : ''}
                  onkeydown="onAddItemKey(event, ${habitIndex})"
                  onclick="event.stopPropagation()">
+          <button class="list-add-btn" ${isMasterLocked ? 'disabled' : ''}
+                  onclick="event.stopPropagation(); addItemFromInput(${habitIndex})">添加</button>
         </div>
         <div class="habit-footer">
           <button class="btn-small btn-export-one" onclick="exportSingleHabit(${habitIndex}, event)">📤 导出此项</button>
