@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>每日打卡</title>
+  <title>打卡工具</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,8 +15,8 @@
 
 <div class="container">
   <div class="header">
-    <h1>📋 每日打卡</h1>
-    <p>记录每一天的坚持</p>
+    <h1>📋 打卡工具</h1>
+    <p>打卡与记录，都在这里</p>
   </div>
 
   <div class="toolbar">
@@ -29,48 +29,73 @@
 
   <div class="add-card" onclick="openModal()">
     <div class="icon">➕</div>
-    <div class="text">添加新打卡</div>
+    <div class="text">添加打卡 / 记录</div>
   </div>
 
 </div>
 
-<!-- 添加/编辑打卡弹窗 -->
+<!-- 添加/编辑弹窗 -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
-    <h2 id="modalTitle">添加打卡</h2>
+    <h2 id="modalTitle">添加</h2>
+
     <div class="form-group">
-      <label>打卡名称</label>
-      <input type="text" id="habitName" placeholder="例如：每日运动" maxlength="20">
+      <label>名称</label>
+      <input type="text" id="habitName" placeholder="例如：每日运动 / 借款记录" maxlength="20">
     </div>
+
     <div class="form-group">
-      <label>开始日期（第1次）</label>
-      <input type="date" id="startDate">
-    </div>
-    <div class="form-group">
-      <label>打卡总天数</label>
-      <input type="number" id="totalDays" placeholder="30" value="30" min="1" max="3650">
-    </div>
-    <div class="form-group">
-      <label>打卡频率</label>
-      <div class="mode-selector" id="modeSelector">
-        <div class="mode-option selected" data-value="single" onclick="selectMode('single')">
-          <span class="mode-label">每日1次</span>
-          <span class="mode-desc">每天签到一次</span>
+      <label>类型<span class="label-hint" id="typeHint"></span></label>
+      <div class="mode-selector" id="typeSelector">
+        <div class="mode-option selected" data-value="daily" onclick="selectType('daily')">
+          <span class="mode-label">每日打卡</span>
+          <span class="mode-desc">按天记录进度</span>
         </div>
-        <div class="mode-option" data-value="twice" onclick="selectMode('twice')">
-          <span class="mode-label">每日2次</span>
-          <span class="mode-desc">上午/下午</span>
-        </div>
-        <div class="mode-option" data-value="thrice" onclick="selectMode('thrice')">
-          <span class="mode-label">每日3次</span>
-          <span class="mode-desc">上午/中午/下午</span>
+        <div class="mode-option" data-value="list" onclick="selectType('list')">
+          <span class="mode-label">记录清单</span>
+          <span class="mode-desc">一行一条，可打勾</span>
         </div>
       </div>
     </div>
-    <div class="form-group" id="slotNamesGroup" style="display:none;">
-      <label>自定义时段名称（可选）</label>
-      <div class="slot-names" id="slotNamesInputs"></div>
+
+    <!-- 每日打卡专属字段 -->
+    <div id="dailyFields">
+      <div class="form-group">
+        <label>开始日期（第1次）</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="form-group">
+        <label>打卡总天数</label>
+        <input type="number" id="totalDays" placeholder="30" value="30" min="1" max="3650">
+      </div>
+      <div class="form-group">
+        <label>打卡频率</label>
+        <div class="mode-selector" id="modeSelector">
+          <div class="mode-option selected" data-value="single" onclick="selectMode('single')">
+            <span class="mode-label">每日1次</span>
+            <span class="mode-desc">每天签到一次</span>
+          </div>
+          <div class="mode-option" data-value="twice" onclick="selectMode('twice')">
+            <span class="mode-label">每日2次</span>
+            <span class="mode-desc">上午/下午</span>
+          </div>
+          <div class="mode-option" data-value="thrice" onclick="selectMode('thrice')">
+            <span class="mode-label">每日3次</span>
+            <span class="mode-desc">上午/中午/下午</span>
+          </div>
+        </div>
+      </div>
+      <div class="form-group" id="slotNamesGroup" style="display:none;">
+        <label>自定义时段名称（可选）</label>
+        <div class="slot-names" id="slotNamesInputs"></div>
+      </div>
     </div>
+
+    <!-- 记录清单专属提示 -->
+    <div id="listHint" style="display:none;">
+      <div class="list-hint-box">保存后在卡片底部输入即可一条条添加，每条都能打勾、修改、删除。</div>
+    </div>
+
     <div class="modal-btns">
       <button class="btn btn-cancel" onclick="closeModal()">取消</button>
       <button class="btn btn-confirm" onclick="saveHabit()">保存</button>
@@ -78,7 +103,7 @@
   </div>
 </div>
 
-<!-- 备注弹窗 -->
+<!-- 备注弹窗（仅每日打卡） -->
 <div class="modal-overlay" id="noteModal">
   <div class="modal">
     <h2>添加备注</h2>
@@ -134,39 +159,44 @@
   </div>
 </div>
 
-<!-- 使用说明弹窗（新增） -->
+<!-- 使用说明弹窗 -->
 <div class="modal-overlay" id="helpModal">
   <div class="modal">
     <h2>📖 使用说明</h2>
-    <div class="help-content">✅ 打卡
-      • 每日 1 次：点整行任意位置都能打卡
-      • 每日 2/3 次：点对应时段的小圆钮
+    <div class="help-content">✅ 每日打卡
+  • 每日 1 次：点整行任意位置都能打卡
+  • 每日 2/3 次：点对应时段的小圆钮
+  • 长按日期：锁定/解锁单日
+  • 点日期旁的 🗨️ 添加备注（200 字以内）
 
-      🔒 锁定
-      • 长按日期：锁定/解锁单日
-      • 长按删除按钮：锁定/解锁"删除"
+📋 记录清单
+  • 点整行：打勾 / 取消打勾
+  • 长按整行：锁定 / 解锁该条
+  • 右侧 ✏️：改文字，改完按回车保存
+  • 右侧 🗑️：删除该条（会先问一次）
+  • 卡片底部输入框：输入后回车即可添加，可以连着加几条
 
-      📝 备注
-      • 点日期旁的 🗨️ 添加备注（200字以内）
-      • 已有备注时显示为 📝
+🔒 通用锁定
+  • 长按日期或清单条目：锁定 / 解锁单项
+  • 卡片上的 🔓 按钮：锁定全部
+  • 长按删除按钮：锁定删除，防误删
 
-      📤 备份与恢复
-      • 导出全部：顶部「导出全部」
-      • 导出单个：展开卡片 → 「导出此项」
-      • 导入：点「导入备份」选 .json 文件，再选导入方式
-        · 合并导入：保留原有数据，只追加新的
-        · 完全替换：清空原有数据（会再确认一次）
-      • 建议定期备份到手机文件
+📤 备份与恢复
+  • 导出全部：顶部「导出全部」
+  • 导出单项：展开卡片 → 「导出此项」
+  • 导入：点「导入备份」选 .json 文件，再选导入方式
+    · 合并导入：保留原有数据，只追加新的
+    · 完全替换：清空原有数据（会再确认一次）
 
-      📅 天数调整
-      • 展开卡片 → 底部 +1 / +7 / +30 天
-      • 减天数：-1 / -7 / -30 天
-      • 减少天数会删掉末尾的记录（备注、锁定一起清）
-      • 锁了「全部锁定」🔒 后，天数按钮不可用
+📅 天数调整（仅每日打卡）
+  • 展开卡片 → 底部 +1 / +7 / +30 天
+  • 减天数：-1 / -7 / -30 天
+  • 减少天数会删掉末尾的记录（备注、锁定一起清）
+  • 锁了「全部锁定」🔒 后天数按钮不可用
 
-      💡 温馨提示
-      • 数据保存在手机本地，卸载应用会丢失
-      • 请定期导出备份</div>
+💡 温馨提示
+  • 数据保存在手机本地，卸载应用会丢失
+  • 请定期导出备份</div>
     <div class="modal-btns">
       <button class="btn btn-confirm" onclick="closeHelpModal()">我知道了</button>
     </div>

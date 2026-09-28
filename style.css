@@ -150,6 +150,64 @@ body {
 
 .date-lock-icon { font-size: 13px; flex-shrink: 0; }
 
+/* ============ 记录清单卡片 ============ */
+.list-body { padding: 0; }
+
+.list-empty {
+  padding: 20px 16px; font-size: 13px; color: #999; text-align: center;
+}
+
+.list-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 12px 12px 14px; border-top: 1px solid #eee;
+  -webkit-tap-highlight-color: transparent; position: relative;
+}
+.list-row:active { background: #f0f0f0; }
+.list-row.locked { opacity: 0.55; }
+
+.item-box {
+  width: 26px; height: 26px; border-radius: 8px; border: 2px solid #ccc;
+  background: white; display: flex; align-items: center; justify-content: center;
+  font-size: 15px; color: white; flex-shrink: 0; user-select: none;
+}
+.item-box.checked { background: #4cd964; border-color: #4cd964; }
+
+.item-text {
+  flex: 1; font-size: 14px; color: #333; min-width: 0;
+  word-break: break-word; line-height: 1.45;
+}
+.item-text input.item-edit-input {
+  width: 100%; padding: 6px 9px; border: 2px solid #667eea;
+  border-radius: 8px; font-size: 14px; font-family: inherit; background: white;
+}
+.item-text input.item-edit-input:focus { outline: none; }
+.list-row.done .item-text { color: #bbb; text-decoration: line-through; }
+.list-row.done .item-box { background: #a0d8a0; border-color: #a0d8a0; }
+
+.item-btn {
+  width: 32px; height: 32px; border-radius: 50%; border: none;
+  background: #f5f5f5; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; cursor: pointer; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+  transition: transform 0.15s;
+}
+.item-btn:active { transform: scale(0.92); }
+.item-btn.item-del { background: #ffebee; }
+
+.item-lock-icon { font-size: 12px; flex-shrink: 0; }
+
+.list-add-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-top: 1px solid #eee; background: #fafafa;
+}
+.list-add-plus { color: #667eea; font-size: 17px; font-weight: 700; flex-shrink: 0; }
+.list-add-input {
+  flex: 1; padding: 10px 12px; border: 2px solid #eee; border-radius: 10px;
+  font-size: 14px; font-family: inherit; background: white; min-width: 0;
+}
+.list-add-input:focus { outline: none; border-color: #667eea; }
+.list-add-input:disabled { opacity: 0.5; }
+
 .habit-footer {
   display: flex; padding: 10px 14px; border-top: 1px solid #eee;
   background: #fafafa; gap: 6px; flex-wrap: wrap;
@@ -206,6 +264,14 @@ body {
 }
 .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #667eea; }
 .char-count { font-size: 11px; color: #aaa; text-align: right; margin-top: 4px; }
+
+.label-hint { font-size: 12px; color: #aaa; margin-left: 4px; }
+#typeSelector.locked { opacity: 0.55; pointer-events: none; }
+
+.list-hint-box {
+  background: #f0f4ff; color: #667eea; border-radius: 12px;
+  padding: 12px 14px; font-size: 12.5px; line-height: 1.75;
+}
 
 #exportData {
   font-family: ui-monospace, Menlo, Consolas, monospace;
@@ -292,6 +358,19 @@ body {
   .check-btn.locked { background: #4a3a1a; border-color: #ff9500; }
   .slot-btn { background: #2d3748; border-color: #4a5568; }
   .slot-btn.locked { background: #4a3a1a; border-color: #ff9500; }
+  /* 记录清单 */
+  .list-empty { color: #718096; }
+  .list-row { border-top-color: #3a4556; }
+  .list-row:active { background: #374357; }
+  .item-box { background: #2d3748; border-color: #4a5568; }
+  .item-text { color: #cbd5e0; }
+  .item-text input.item-edit-input { background: #1a202c; border-color: #667eea; color: #e2e8f0; }
+  .list-row.done .item-text { color: #718096; }
+  .item-btn { background: #3a4556; color: #cbd5e0; }
+  .item-btn.item-del { background: #4a2c2c; }
+  .list-add-row { background: #252d3d; border-top-color: #3a4556; }
+  .list-add-plus { color: #9aa8f0; }
+  .list-add-input { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
   .habit-footer { background: #252d3d; border-top-color: #3a4556; }
   .btn-uncheck-all { background: #3a4556; color: #cbd5e0; }
   .btn-add-days { background: #1e3a5f; color: #63b3ed; }
@@ -304,6 +383,8 @@ body {
   .form-group input, .form-group textarea {
     background: #1a202c; border-color: #4a5568; color: #e2e8f0;
   }
+  .label-hint { color: #718096; }
+  .list-hint-box { background: #2a3560; color: #9aa8f0; }
   #exportData { background: #1a202c; color: #cbd5e0; }
   .mode-option { background: #1a202c; border-color: #4a5568; }
   .mode-option .mode-label { color: #cbd5e0; }
@@ -327,6 +408,9 @@ body {
   .icon-btn.move-btn { height: 24px; padding: 0 7px; font-size: 10.5px; }
   .habit-stats-row { gap: 3px; }
   .progress-text { font-size: 12px; }
+  .item-box { width: 24px; height: 24px; font-size: 14px; border-radius: 7px; }
+  .item-btn { width: 29px; height: 29px; font-size: 12px; }
+  .item-text { font-size: 13px; }
 }
 @media (max-width: 360px) {
   .slot-btn { width: 30px; height: 30px; font-size: 10px; }
@@ -337,6 +421,10 @@ body {
   .icon-btn.move-btn { height: 23px; padding: 0 6px; font-size: 10px; }
   .btn-small { font-size: 11px; padding: 8px 6px; min-width: 42px; }
   .date-item { padding: 9px 10px; gap: 4px; }
+  .list-row { padding: 10px 8px; gap: 6px; }
+  .item-box { width: 22px; height: 22px; font-size: 13px; border-radius: 7px; }
+  .item-btn { width: 27px; height: 27px; font-size: 11px; }
+  .list-add-row { padding: 10px 10px; }
 }
 
 /* ============ 右上角帮助按钮 ============ */

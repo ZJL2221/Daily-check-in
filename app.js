@@ -82,7 +82,7 @@ function showImportChoice(existing, incoming) {
     importResolve = resolve;
     importOpenedAt = Date.now();
     document.getElementById('importText').textContent =
-      '当前已有 ' + existing + ' 个打卡项目，备份文件里有 ' + incoming + ' 个。\n\n请选择导入方式：';
+      '当前已有 ' + existing + ' 个项目，备份文件里有 ' + incoming + ' 个。\n\n请选择导入方式：';
     document.getElementById('importModal').classList.add('active');
   });
 }
@@ -94,7 +94,7 @@ function closeImportChoice(result) {
   if (r) r(result);
 }
 
-/* ---------- 打卡按钮：长按锁定 + 短按打卡 ---------- */
+/* ---------- 打卡按钮：长按锁定 + 短按打卡（每日打卡） ---------- */
 let btnPressTimer = null;
 let btnPressFired = false;
 let btnPressStartX = 0;
@@ -149,6 +149,7 @@ function btnPressEnd(i, dateStr, slotIndex, e) {
     return;
   }
   const h = getHabits();
+  if (!h[i]) return;
   if (h[i].masterLocked) return;
   if (h[i].lockedDates && h[i].lockedDates.includes(dateStr)) return;
   if (slotIndex === -1) {
@@ -271,6 +272,7 @@ function toggleMonth(i, monthKey, e) {
 function toggleSingleCheck(i, dateStr, e) {
   if (e) e.stopPropagation();
   const h = getHabits();
+  if (!h[i] || getHabitType(h[i]) !== TYPE_DAILY) return;
   if (h[i].masterLocked) return;
   if (h[i].lockedDates && h[i].lockedDates.includes(dateStr)) return;
   if ((h[i].mode || 'single') !== 'single') return;
@@ -284,6 +286,7 @@ function toggleSingleCheck(i, dateStr, e) {
 function toggleSlotCheck(i, dateStr, slotIndex, e) {
   if (e) e.stopPropagation();
   const h = getHabits();
+  if (!h[i] || getHabitType(h[i]) !== TYPE_DAILY) return;
   if (h[i].masterLocked) return;
   if (h[i].lockedDates && h[i].lockedDates.includes(dateStr)) return;
   if ((h[i].mode || 'single') === 'single') return;
@@ -316,10 +319,10 @@ function onDateTouchStart(e, i, dateStr) {
 
 function onDateTouchEnd(e, i, dateStr) {
   cancelLongPress();
-  window._lastTouchEnd = Date.now();  // ← 新增这一行
+  window._lastTouchEnd = Date.now();
   if (isLongPress || hasMoved) { isLongPress = false; hasMoved = false; return; }
   const h = getHabits();
-  if ((h[i].mode || 'single') === 'single') {
+  if (h[i] && (h[i].mode || 'single') === 'single') {
     const locked = h[i].masterLocked || (h[i].lockedDates || []).includes(dateStr);
     if (!locked) toggleSingleCheck(i, dateStr, e);
   }
@@ -337,7 +340,7 @@ function onDateClick(e, i, dateStr) {
   // 点按钮、备注图标时忽略
   if (target.closest && (target.closest('.check-btn') || target.closest('.slot-btn') || target.closest('.note-btn'))) return;
 
-  if ((h[i].mode || 'single') !== 'single') return;
+  if (!h[i] || (h[i].mode || 'single') !== 'single') return;
 
   const locked = h[i].masterLocked || (h[i].lockedDates || []).includes(dateStr);
   if (!locked) toggleSingleCheck(i, dateStr);
@@ -345,6 +348,7 @@ function onDateClick(e, i, dateStr) {
 
 async function checkAll(i, check) {
   const h = getHabits();
+  if (!h[i] || getHabitType(h[i]) !== TYPE_DAILY) return;
   if (h[i].masterLocked) return;
   const locked = h[i].lockedDates || [];
   const action = check ? '全部打卡' : '全部取消';
@@ -373,17 +377,17 @@ async function checkAll(i, check) {
 async function deleteHabit(i) {
   const h = getHabits();
   if (!h[i]) return;
-  if (!(await showConfirm('确定要删除「' + h[i].name + '」吗？', '删除打卡'))) return;
+  if (!(await showConfirm('确定要删除「' + h[i].name + '」吗？', '删除项目'))) return;
   const removed = h.splice(i, 1)[0];
   saveHabits(h);
   renderHabits();
   showUndoBar(removed, i);
 }
 
-/* ---------- 天数增减 ---------- */
+/* ---------- 天数增减（仅每日打卡） ---------- */
 function addDays(i, days) {
   const h = getHabits();
-  if (!h[i]) return;
+  if (!h[i] || getHabitType(h[i]) !== TYPE_DAILY) return;
   if (h[i].masterLocked) return;
   const newTotal = h[i].totalDays + days;
   if (newTotal > 3650) { alert('总天数不能超过 3650 天'); return; }
@@ -401,7 +405,7 @@ function addDays(i, days) {
 
 async function reduceDays(i, days) {
   const h = getHabits();
-  if (!h[i]) return;
+  if (!h[i] || getHabitType(h[i]) !== TYPE_DAILY) return;
   if (h[i].masterLocked) return;
   const newTotal = h[i].totalDays - days;
   if (newTotal < 1) { alert('总天数不能少于 1 天'); return; }
@@ -468,12 +472,13 @@ function showUndoBar(habit, index) {
   undoTimer = setTimeout(() => { bar.remove(); undoBarEl = null; }, 5000);
 }
 
-/* ---------- 备注 ---------- */
+/* ---------- 备注（仅每日打卡） ---------- */
 let noteHabitIndex = -1;
 let noteDateStr = '';
 
 function openNoteModal(i, dateStr) {
   const h = getHabits();
+  if (!h[i]) return;
   noteHabitIndex = i;
   noteDateStr = dateStr;
   const d = parseDateStr(dateStr);
@@ -507,17 +512,179 @@ function saveNote() {
   renderHabits();
 }
 
+/* ============ 记录清单：条目交互 ============ */
+let itemPressTimer = null;
+let itemPressFired = false;
+let itemPressMoved = false;
+let itemPressStartX = 0;
+let itemPressStartY = 0;
+let itemPressTouchTime = -Infinity;
+
+function itemPressStart(habitIndex, itemId, e) {
+  if (e) {
+    e.stopPropagation();
+    if (e.type === 'mousedown') {
+      // 同打卡按钮：忽略触摸后补发的合成鼠标事件
+      if (Date.now() - itemPressTouchTime < 700) return;
+    } else if (e.type === 'touchstart') {
+      itemPressTouchTime = Date.now();
+    }
+  }
+  const t = e.touches ? e.touches[0] : e;
+  itemPressStartX = t.clientX;
+  itemPressStartY = t.clientY;
+  itemPressMoved = false;
+  itemPressFired = false;
+  clearTimeout(itemPressTimer);
+  // 500ms 长按 → 锁定/解锁该条
+  itemPressTimer = setTimeout(() => {
+    itemPressFired = true;
+    toggleItemLock(habitIndex, itemId);
+  }, 500);
+}
+
+function itemPressMove(e) {
+  if (!e) return;
+  e.stopPropagation();
+  if (e.type === 'mousemove' && Date.now() - itemPressTouchTime < 700) return;
+  const t = e.touches ? e.touches[0] : e;
+  if (Math.abs(t.clientX - itemPressStartX) > 10 || Math.abs(t.clientY - itemPressStartY) > 10) {
+    itemPressMoved = true;
+    clearTimeout(itemPressTimer);
+  }
+}
+
+function itemPressEnd(habitIndex, itemId, e) {
+  if (e) {
+    e.stopPropagation();
+    if (e.type === 'touchend') e.preventDefault();
+    if (e.type === 'mouseup' && Date.now() - itemPressTouchTime < 700) return;
+  }
+  clearTimeout(itemPressTimer);
+  if (itemPressFired || itemPressMoved) {
+    itemPressFired = false;
+    itemPressMoved = false;
+    return;
+  }
+  const h = getHabits();
+  const habit = h[habitIndex];
+  if (!habit) return;
+  const item = getListItem(habit, itemId);
+  if (!item) return;
+  if (habit.masterLocked || item.locked) return;
+  toggleItemDone(habitIndex, itemId);
+}
+
+function itemPressCancel(e) {
+  if (e) e.stopPropagation();
+  clearTimeout(itemPressTimer);
+  itemPressFired = false;
+  itemPressMoved = false;
+}
+
+function toggleItemDone(i, itemId) {
+  const h = getHabits();
+  if (!h[i]) return;
+  if (!toggleListItemDone(h[i], itemId)) return;
+  saveHabits(h);
+  renderHabits();
+}
+
+function toggleItemLock(i, itemId) {
+  const h = getHabits();
+  if (!h[i]) return;
+  if (!toggleListItemLock(h[i], itemId)) return;
+  saveHabits(h);
+  renderHabits();
+}
+
+/* 删除单条记录：先弹确认，再删 */
+async function deleteListItem(i, itemId, e) {
+  if (e) e.stopPropagation();
+  const h = getHabits();
+  if (!h[i]) return;
+  const item = getListItem(h[i], itemId);
+  if (!item) return;
+  if (h[i].masterLocked || item.locked) return;
+  if (!(await showConfirm('确定要删除「' + item.text + '」吗？', '删除这条记录'))) return;
+  const hh = getHabits();
+  if (!hh[i]) return;
+  removeListItem(hh[i], itemId);
+  saveHabits(hh);
+  renderHabits();
+}
+
+/* 改文字：把该行原地换成输入框，回车保存、Esc 放弃 */
+function startItemEdit(i, itemId, e) {
+  if (e) e.stopPropagation();
+  const h = getHabits();
+  if (!h[i]) return;
+  const item = getListItem(h[i], itemId);
+  if (!item) return;
+  if (h[i].masterLocked || item.locked) return;
+
+  const row = document.querySelector('.list-row[data-item="' + itemId + '"]');
+  if (!row) return;
+  const textEl = row.querySelector('.item-text');
+  if (!textEl || textEl.querySelector('input')) return;
+
+  const old = item.text;
+  textEl.innerHTML = '<input class="item-edit-input" type="text" maxlength="' + LIST_ITEM_MAX +
+    '" value="' + escapeHtml(old) + '">';
+  const input = textEl.querySelector('input');
+  input.focus();
+  try { input.setSelectionRange(input.value.length, input.value.length); } catch (_) {}
+
+  let finished = false;
+  const commit = (save) => {
+    if (finished) return;
+    finished = true;
+    const v = input.value.trim();
+    if (save && v && v !== old) {
+      const hh = getHabits();
+      if (hh[i]) {
+        setListItemText(hh[i], itemId, v);
+        saveHabits(hh);
+      }
+    }
+    renderHabits();
+  };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+  });
+  input.addEventListener('blur', () => commit(true));
+  // 别让输入框里的点击被整行的"打勾"处理吃掉
+  ['click', 'mousedown', 'touchstart', 'touchmove', 'touchend'].forEach(t =>
+    input.addEventListener(t, ev => ev.stopPropagation()));
+}
+
+/* 底部输入框：回车添加一条，重新聚焦以便连着加 */
+function onAddItemKey(ev, i) {
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  const v = ev.target.value.trim();
+  if (!v) return;
+  const h = getHabits();
+  if (!h[i]) return;
+  addListItem(h[i], v);
+  saveHabits(h);
+  renderHabits();
+  const inp = document.querySelector('.list-add-input[data-habit="' + i + '"]');
+  if (inp) inp.focus();
+}
+
 /* ---------- 导入导出 ---------- */
 let exportDataStr = '';
 
 async function exportData() {
   if (habitsCache.length === 0) {
-    alert('还没有任何打卡项目');
+    alert('还没有任何项目');
     return;
   }
   const data = JSON.stringify(habitsCache, null, 2);
   const filename = '打卡备份_' + formatDate(new Date()) + '_全部.json';
-  await doSaveFile(filename, data, '全部打卡（共 ' + habitsCache.length + ' 项）');
+  await doSaveFile(filename, data, '全部内容（共 ' + habitsCache.length + ' 项）');
 }
 
 async function exportSingleHabit(index, e) {
@@ -571,7 +738,7 @@ async function copyExportData() {
   }
 }
 
-/* ---------- 导入（修复：支持合并或替换） ---------- */
+/* ---------- 导入（支持合并或替换） ---------- */
 function importData(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -582,7 +749,7 @@ function importData(event) {
       if (!Array.isArray(arr)) throw new Error('文件格式不正确，应为 JSON 数组');
 
       const normalized = arr.map((h, i) => normalizeHabit(h, i)).filter(Boolean);
-      if (normalized.length === 0) throw new Error('文件中没有有效的打卡项目');
+      if (normalized.length === 0) throw new Error('文件中没有有效的项目');
       normalized.forEach(ensureExpandedMonths);
 
       // 没有数据、或只剩一个从没动过的默认项目时，直接导入
@@ -617,7 +784,7 @@ function importData(event) {
       } else if (choice === 'replace') {
         // 替换会清空现有数据且不可撤销，第二道确认保留
         const ok = await showConfirm(
-          '⚠️ 确定要完全替换吗？\n\n现有的 ' + habitsCache.length + ' 个打卡项目将全部丢失，此操作不可撤销。',
+          '⚠️ 确定要完全替换吗？\n\n现有的 ' + habitsCache.length + ' 个项目将全部丢失，此操作不可撤销。',
           '完全替换'
         );
         if (!ok) return;
@@ -636,16 +803,40 @@ function importData(event) {
   event.target.value = '';
 }
 
-/* ---------- 添加/编辑弹窗 ---------- */
-let selectedMode = 'single';
+/* ============ 添加/编辑弹窗 ============ */
+let selectedMode = 'single';      // 每日打卡的频率
+let selectedType = 'daily';       // 项目类型：daily / list
+let typeLocked = false;           // 编辑时类型不可改
 let editingIndex = -1;
 
 function selectMode(mode) {
   selectedMode = mode;
-  document.querySelectorAll('.mode-option').forEach(el => {
+  // 注意：必须限定在 #modeSelector 内，否则会误改上面的"类型"选择器
+  document.querySelectorAll('#modeSelector .mode-option').forEach(el => {
     el.classList.toggle('selected', el.dataset.value === mode);
   });
   renderSlotNameInputs();
+}
+
+function selectType(type, force) {
+  if (typeLocked && !force) return;
+  selectedType = (type === TYPE_LIST) ? TYPE_LIST : TYPE_DAILY;
+  document.querySelectorAll('#typeSelector .mode-option').forEach(el => {
+    el.classList.toggle('selected', el.dataset.value === selectedType);
+  });
+  applyTypeFields();
+}
+
+function applyTypeFields() {
+  const isDaily = selectedType === TYPE_DAILY;
+  document.getElementById('dailyFields').style.display = isDaily ? '' : 'none';
+  document.getElementById('listHint').style.display = isDaily ? 'none' : '';
+}
+
+function lockTypeSelector(locked) {
+  typeLocked = locked;
+  document.getElementById('typeSelector').classList.toggle('locked', locked);
+  document.getElementById('typeHint').textContent = locked ? '（创建后不可更改）' : '';
 }
 
 function renderSlotNameInputs(presetNames) {
@@ -665,43 +856,82 @@ function renderSlotNameInputs(presetNames) {
 
 function openModal() {
   editingIndex = -1;
-  document.getElementById('modalTitle').textContent = '添加打卡';
+  document.getElementById('modalTitle').textContent = '添加';
   document.getElementById('habitName').value = '';
   document.getElementById('totalDays').value = '30';
   document.getElementById('startDate').value = formatDate(new Date());
+  lockTypeSelector(false);
+  selectType(TYPE_DAILY, true);
   selectMode('single');
   renderSlotNameInputs();
   document.getElementById('modal').classList.add('active');
 }
 
-/* ---------- 编辑（修复：不自动聚焦，避免弹出输入法） ---------- */
+/* ---------- 编辑（不自动聚焦，避免弹出输入法） ---------- */
 function openEditModal(i, e) {
   if (e) e.stopPropagation();
   const h = getHabits();
   if (!h[i]) return;
   editingIndex = i;
-  document.getElementById('modalTitle').textContent = '编辑打卡';
+  const type = getHabitType(h[i]);
+  document.getElementById('modalTitle').textContent = '编辑';
   document.getElementById('habitName').value = h[i].name;
-  document.getElementById('startDate').value = h[i].startDate;
-  document.getElementById('totalDays').value = h[i].totalDays;
-  selectMode(h[i].mode);
-  renderSlotNameInputs(h[i].slotNames);
+  lockTypeSelector(true);
+  selectType(type, true);
+  if (type === TYPE_DAILY) {
+    document.getElementById('startDate').value = h[i].startDate;
+    document.getElementById('totalDays').value = h[i].totalDays;
+    selectMode(h[i].mode);
+    renderSlotNameInputs(h[i].slotNames);
+  }
   document.getElementById('modal').classList.add('active');
-  // 关键修复：编辑模式不自动聚焦，避免弹出输入法挡住视野
 }
 
 function closeModal() {
   document.getElementById('modal').classList.remove('active');
   editingIndex = -1;
+  lockTypeSelector(false);
 }
 
 function saveHabit() {
   const name = document.getElementById('habitName').value.trim();
+  const type = selectedType || TYPE_DAILY;
+  const habits = getHabits();
+
+  if (!name) { alert('请输入名称'); return; }
+
+  /* ---- 记录清单：只要一个名称 ---- */
+  if (type === TYPE_LIST) {
+    if (editingIndex >= 0 && habits[editingIndex]) {
+      habits[editingIndex].name = name;
+      habits[editingIndex].type = TYPE_LIST;
+    } else {
+      habits.push({
+        type: TYPE_LIST,
+        name,
+        items: [],
+        expanded: true,
+        order: habits.length
+      });
+    }
+    saveHabits(habits);
+    closeModal();
+    renderHabits();
+    // 新建的清单直接把光标送到添加框，省一次点击
+    if (editingIndex < 0) {
+      setTimeout(() => {
+        const inp = document.querySelector('.list-add-input[data-habit="' + (habits.length - 1) + '"]');
+        if (inp) inp.focus();
+      }, 320);
+    }
+    return;
+  }
+
+  /* ---- 每日打卡 ---- */
   const startDate = document.getElementById('startDate').value;
   const totalDays = parseInt(document.getElementById('totalDays').value, 10) || 30;
   const mode = selectedMode || 'single';
 
-  if (!name) { alert('请输入打卡名称'); return; }
   if (!startDate) { alert('请选择开始日期'); return; }
   if (totalDays < 1 || totalDays > 3650) { alert('总天数需在 1 至 3650 之间'); return; }
 
@@ -716,11 +946,11 @@ function saveHabit() {
     }
   }
 
-  const habits = getHabits();
   if (editingIndex >= 0 && habits[editingIndex]) {
     const old = habits[editingIndex];
     // 必须在改写 mode/slotNames 之前迁移，否则读不到旧频率和旧时段名
     migrateModeData(old, mode, slotNames);
+    old.type = TYPE_DAILY;
     old.name = name;
     old.startDate = startDate;
     old.totalDays = totalDays;
@@ -751,6 +981,7 @@ function saveHabit() {
     renderHabits();
   } else {
     const created = {
+      type: TYPE_DAILY,
       name, startDate, totalDays, mode, slotNames,
       completedDates: [], completedCounts: {}, notes: {},
       lockedDates: [], masterLocked: false, deleteLocked: false,
@@ -764,7 +995,7 @@ function saveHabit() {
   }
 }
 
-/* ---------- 渲染 ---------- */
+/* ============ 渲染 ============ */
 function renderHabits(preserveScroll) {
   if (preserveScroll === undefined) preserveScroll = true;
   const scrollY = preserveScroll ? window.scrollY : 0;
@@ -773,87 +1004,172 @@ function renderHabits(preserveScroll) {
   const container = document.getElementById('habitList');
 
   if (habits.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">📝</div><p>还没有打卡项目<br>点击下方添加一个吧</p></div>';
+    container.innerHTML = '<div class="empty-state"><div class="icon">📝</div><p>还没有内容<br>点下面按钮添加打卡或记录</p></div>';
     if (preserveScroll) window.scrollTo(0, scrollY);
     return;
   }
 
-  container.innerHTML = habits.map((habit, habitIndex) => {
-    const mode = habit.mode || 'single';
-    const dates = getDates(habit.startDate, habit.totalDays);
-    const totalSlots = getTotalSlots(habit);
-    const completedCount = getTotalCompletedCount(habit);
-    const progress = totalSlots > 0 ? Math.round(completedCount / totalSlots * 100) : 0;
-    const isExpanded = habit.expanded || false;
-    const isMasterLocked = habit.masterLocked || false;
-    const isDeleteLocked = habit.deleteLocked || false;
-    const lockedDates = habit.lockedDates || [];
-    const isArchived = progress >= 100 && totalSlots > 0;
-
-    const perDayLabel = mode === 'single' ? '每日1次' : mode === 'twice' ? '每日2次' : '每日3次';
-
-    return `
-      <div class="card ${isArchived ? 'archived' : ''}">
-        <div class="habit-header" onclick="toggleExpand(${habitIndex})">
-          <div class="habit-info">
-            <div class="habit-title-row">
-              <h3>${escapeHtml(habit.name)} ${isArchived ? '✅' : ''}</h3>
-              <span class="progress-text">${completedCount}/${totalSlots}</span>
-            </div>
-            <div class="date-info">
-              <div>${habit.startDate} 开始</div>
-              <div>${habit.totalDays}天 · ${perDayLabel}</div>
-            </div>
-            <div class="progress-bar-small">
-              <div class="progress-fill-small" style="width:${Math.min(progress, 100)}%"></div>
-            </div>
-          </div>
-          <div class="habit-stats">
-            <div class="habit-stats-row">
-              <button class="icon-btn move-btn" onclick="moveHabit(${habitIndex}, -1, event)" title="上移" ${habitIndex === 0 ? 'disabled' : ''}>上移</button>
-              <button class="icon-btn move-btn" onclick="moveHabit(${habitIndex}, 1, event)" title="下移" ${habitIndex === habits.length - 1 ? 'disabled' : ''}>下移</button>
-            </div>
-            <div class="habit-stats-row">
-              <button class="icon-btn ${isMasterLocked ? 'locked' : ''}"
-                      onclick="toggleMasterLock(${habitIndex}, event)"
-                      title="${isMasterLocked ? '已锁定，点击解锁' : '锁定全部'}">${isMasterLocked ? '🔒' : '🔓'}</button>
-              <button class="icon-btn" onclick="openEditModal(${habitIndex}, event)" title="编辑">✏️</button>
-              <button class="icon-btn delete-btn ${isDeleteLocked ? 'locked' : ''}"
-                      onclick="event.stopPropagation()"
-                      ontouchstart="startDeletePress(${habitIndex}, event)"
-                      ontouchend="endDeletePress(${habitIndex}, event)"
-                      ontouchmove="cancelDeletePress(event)"
-                      onmousedown="startDeletePress(${habitIndex}, event)"
-                      onmouseup="endDeletePress(${habitIndex}, event)"
-                      onmouseleave="cancelDeletePress(event)"
-                      title="${isDeleteLocked ? '已锁定，长按解锁' : '短按删除，长按锁定'}">${isDeleteLocked ? '🔒' : '🗑️'}</button>
-              <span class="arrow ${isExpanded ? 'expanded' : ''}">▼</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="date-list ${isExpanded ? 'expanded' : ''}">
-          <div class="long-press-hint">💡 长按日期可锁定/解锁 · 点击 🗨️ 添加备注</div>
-          ${renderDateSection(habit, habitIndex, dates, mode, lockedDates, isMasterLocked)}
-          <div class="habit-footer">
-            <button class="btn-small btn-check-all" onclick="checkAll(${habitIndex}, true)" ${isMasterLocked ? 'disabled' : ''}>全部打卡</button>
-            <button class="btn-small btn-uncheck-all" onclick="checkAll(${habitIndex}, false)" ${isMasterLocked ? 'disabled' : ''}>全部取消</button>
-            <button class="btn-small btn-export-one" onclick="exportSingleHabit(${habitIndex}, event)">📤 导出此项</button>
-          </div>
-          <div class="habit-footer add-days-footer">
-            <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 1)" ${isMasterLocked ? 'disabled' : ''}>+1天</button>
-            <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 7)" ${isMasterLocked ? 'disabled' : ''}>+7天</button>
-            <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 30)" ${isMasterLocked ? 'disabled' : ''}>+30天</button>
-            <button class="btn-small btn-sub-days" onclick="reduceDays(${habitIndex}, 1)" ${isMasterLocked ? 'disabled' : ''}>-1天</button>
-            <button class="btn-small btn-sub-days" onclick="reduceDays(${habitIndex}, 7)" ${isMasterLocked ? 'disabled' : ''}>-7天</button>
-            <button class="btn-small btn-sub-days" onclick="reduceDays(${habitIndex}, 30)" ${isMasterLocked ? 'disabled' : ''}>-30天</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
+  container.innerHTML = habits.map((habit, habitIndex) => (
+    getHabitType(habit) === TYPE_LIST
+      ? renderListCard(habit, habitIndex, habits.length)
+      : renderDailyCard(habit, habitIndex, habits.length)
+  )).join('');
 
   if (preserveScroll) window.scrollTo(0, scrollY);
+}
+
+/* 卡片公共的右上角操作区（上移/下移/锁定全部/编辑/删除/展开） */
+function renderCardActions(habit, habitIndex, total) {
+  const isExpanded = habit.expanded !== false;
+  const isMasterLocked = habit.masterLocked || false;
+  const isDeleteLocked = habit.deleteLocked || false;
+  return `
+    <div class="habit-stats">
+      <div class="habit-stats-row">
+        <button class="icon-btn move-btn" onclick="moveHabit(${habitIndex}, -1, event)" title="上移" ${habitIndex === 0 ? 'disabled' : ''}>上移</button>
+        <button class="icon-btn move-btn" onclick="moveHabit(${habitIndex}, 1, event)" title="下移" ${habitIndex === total - 1 ? 'disabled' : ''}>下移</button>
+      </div>
+      <div class="habit-stats-row">
+        <button class="icon-btn ${isMasterLocked ? 'locked' : ''}"
+                onclick="toggleMasterLock(${habitIndex}, event)"
+                title="${isMasterLocked ? '已锁定，点击解锁' : '锁定全部'}">${isMasterLocked ? '🔒' : '🔓'}</button>
+        <button class="icon-btn" onclick="openEditModal(${habitIndex}, event)" title="编辑">✏️</button>
+        <button class="icon-btn delete-btn ${isDeleteLocked ? 'locked' : ''}"
+                onclick="event.stopPropagation()"
+                ontouchstart="startDeletePress(${habitIndex}, event)"
+                ontouchend="endDeletePress(${habitIndex}, event)"
+                ontouchmove="cancelDeletePress(event)"
+                onmousedown="startDeletePress(${habitIndex}, event)"
+                onmouseup="endDeletePress(${habitIndex}, event)"
+                onmouseleave="cancelDeletePress(event)"
+                title="${isDeleteLocked ? '已锁定，长按解锁' : '短按删除，长按锁定'}">${isDeleteLocked ? '🔒' : '🗑️'}</button>
+        <span class="arrow ${isExpanded ? 'expanded' : ''}">▼</span>
+      </div>
+    </div>`;
+}
+
+/* ---------- 记录清单卡片 ---------- */
+function renderListCard(habit, habitIndex, total) {
+  const isExpanded = habit.expanded !== false;
+  const isMasterLocked = habit.masterLocked || false;
+  const stats = getListStats(habit);
+  const items = habit.items || [];
+
+  const rows = items.length === 0
+    ? '<div class="list-empty">还没有条目，在下面输入框里加一条</div>'
+    : items.map(it => {
+        const locked = isMasterLocked || it.locked;
+        return `
+          <div class="list-row ${it.done ? 'done' : ''} ${locked ? 'locked' : ''}"
+               data-item="${it.id}"
+               ontouchstart="itemPressStart(${habitIndex}, '${it.id}', event)"
+               ontouchmove="itemPressMove(event)"
+               ontouchend="itemPressEnd(${habitIndex}, '${it.id}', event)"
+               onmousedown="itemPressStart(${habitIndex}, '${it.id}', event)"
+               onmousemove="itemPressMove(event)"
+               onmouseup="itemPressEnd(${habitIndex}, '${it.id}', event)"
+               onmouseleave="itemPressCancel(event)">
+            <div class="item-box ${it.done ? 'checked' : ''}">${it.done ? '✓' : ''}</div>
+            <div class="item-text">${escapeHtml(it.text)}</div>
+            <button class="item-btn item-edit" title="修改文字"
+                    ontouchstart="event.stopPropagation()" ontouchend="event.stopPropagation()"
+                    onmousedown="event.stopPropagation()"
+                    onclick="startItemEdit(${habitIndex}, '${it.id}', event)">✏️</button>
+            <button class="item-btn item-del" title="删除这条"
+                    ontouchstart="event.stopPropagation()" ontouchend="event.stopPropagation()"
+                    onmousedown="event.stopPropagation()"
+                    onclick="deleteListItem(${habitIndex}, '${it.id}', event)">🗑️</button>
+            ${locked ? '<div class="item-lock-icon">🔒</div>' : ''}
+          </div>`;
+      }).join('');
+
+  return `
+    <div class="card list-card">
+      <div class="habit-header" onclick="toggleExpand(${habitIndex})">
+        <div class="habit-info">
+          <div class="habit-title-row">
+            <h3>${escapeHtml(habit.name)}</h3>
+            <span class="progress-text">${stats.done} / ${stats.total}</span>
+          </div>
+          <div class="date-info">
+            <div>记录清单</div>
+            <div>${stats.total - stats.done} 条待完成 · 共 ${stats.total} 条</div>
+          </div>
+        </div>
+        ${renderCardActions(habit, habitIndex, total)}
+      </div>
+
+      <div class="date-list ${isExpanded ? 'expanded' : ''}">
+        <div class="long-press-hint">💡 点条目打勾 · 长按锁定 · 右侧可改字或删除</div>
+        <div class="list-body">${rows}</div>
+        <div class="list-add-row">
+          <span class="list-add-plus">＋</span>
+          <input class="list-add-input" data-habit="${habitIndex}" type="text"
+                 maxlength="${LIST_ITEM_MAX}" placeholder="输入后按回车添加一条"
+                 ${isMasterLocked ? 'disabled' : ''}
+                 onkeydown="onAddItemKey(event, ${habitIndex})"
+                 onclick="event.stopPropagation()">
+        </div>
+        <div class="habit-footer">
+          <button class="btn-small btn-export-one" onclick="exportSingleHabit(${habitIndex}, event)">📤 导出此项</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- 每日打卡卡片 ---------- */
+function renderDailyCard(habit, habitIndex, total) {
+  const mode = habit.mode || 'single';
+  const dates = getDates(habit.startDate, habit.totalDays);
+  const totalSlots = getTotalSlots(habit);
+  const completedCount = getTotalCompletedCount(habit);
+  const progress = totalSlots > 0 ? Math.round(completedCount / totalSlots * 100) : 0;
+  const isExpanded = habit.expanded || false;
+  const isMasterLocked = habit.masterLocked || false;
+  const lockedDates = habit.lockedDates || [];
+  const isArchived = progress >= 100 && totalSlots > 0;
+
+  const perDayLabel = mode === 'single' ? '每日1次' : mode === 'twice' ? '每日2次' : '每日3次';
+
+  return `
+    <div class="card ${isArchived ? 'archived' : ''}">
+      <div class="habit-header" onclick="toggleExpand(${habitIndex})">
+        <div class="habit-info">
+          <div class="habit-title-row">
+            <h3>${escapeHtml(habit.name)} ${isArchived ? '✅' : ''}</h3>
+            <span class="progress-text">${completedCount}/${totalSlots}</span>
+          </div>
+          <div class="date-info">
+            <div>${habit.startDate} 开始</div>
+            <div>${habit.totalDays}天 · ${perDayLabel}</div>
+          </div>
+          <div class="progress-bar-small">
+            <div class="progress-fill-small" style="width:${Math.min(progress, 100)}%"></div>
+          </div>
+        </div>
+        ${renderCardActions(habit, habitIndex, total)}
+      </div>
+
+      <div class="date-list ${isExpanded ? 'expanded' : ''}">
+        <div class="long-press-hint">💡 长按日期可锁定/解锁 · 点击 🗨️ 添加备注</div>
+        ${renderDateSection(habit, habitIndex, dates, mode, lockedDates, isMasterLocked)}
+        <div class="habit-footer">
+          <button class="btn-small btn-check-all" onclick="checkAll(${habitIndex}, true)" ${isMasterLocked ? 'disabled' : ''}>全部打卡</button>
+          <button class="btn-small btn-uncheck-all" onclick="checkAll(${habitIndex}, false)" ${isMasterLocked ? 'disabled' : ''}>全部取消</button>
+          <button class="btn-small btn-export-one" onclick="exportSingleHabit(${habitIndex}, event)">📤 导出此项</button>
+        </div>
+        <div class="habit-footer add-days-footer">
+          <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 1)" ${isMasterLocked ? 'disabled' : ''}>+1天</button>
+          <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 7)" ${isMasterLocked ? 'disabled' : ''}>+7天</button>
+          <button class="btn-small btn-add-days" onclick="addDays(${habitIndex}, 30)" ${isMasterLocked ? 'disabled' : ''}>+30天</button>
+          <button class="btn-small btn-sub-days" onclick="reduceDays(${habitIndex}, 1)" ${isMasterLocked ? 'disabled' : ''}>-1天</button>
+          <button class="btn-small btn-sub-days" onclick="reduceDays(${habitIndex}, 7)" ${isMasterLocked ? 'disabled' : ''}>-7天</button>
+          <button class="btn-small btn-sub-days" onclick="reduceDays(${habitIndex}, 30)" ${isMasterLocked ? 'disabled' : ''}>-30天</button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function renderDateSection(habit, habitIndex, dates, mode, lockedDates, isMasterLocked) {
@@ -954,14 +1270,15 @@ function renderDateItem(habit, habitIndex, d, mode, lockedDates, isMasterLocked)
 }
 
 /* ---------- 兼容旧版本自动生成的「我的打卡」 ---------- */
-// 新版本不再自动创建任何打卡：一个都没有时就显示空状态，等用户自己添加。
+// 新版不再自动创建任何项目：一个都没有时就显示空状态，等用户自己添加。
 // 这个判断只用于兼容老安装 —— 如果仅剩一条从没动过的「我的打卡」，
 // 导入备份时直接导入，不必再问合并还是替换。
 function isUntouchedDefault(h) {
   return h.name === '我的打卡' &&
     (h.completedDates || []).length === 0 &&
     Object.keys(h.completedCounts || {}).length === 0 &&
-    Object.keys(h.notes || {}).length === 0;
+    Object.keys(h.notes || {}).length === 0 &&
+    (h.items || []).length === 0;
 }
 
 /* ---------- 使用说明弹窗 ---------- */
@@ -1032,7 +1349,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     const data = JSON.stringify(habitsCache);
     const bytes = new Blob([data]).size;
     if (bytes > 4 * 1024 * 1024) {
-      alert('本地存储已接近上限（约 5MB），建议导出备份后删除部分旧打卡。');
+      alert('本地存储已接近上限（约 5MB），建议导出备份后删除部分旧内容。');
     }
   }, 800);
 });

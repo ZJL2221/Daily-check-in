@@ -1,4 +1,4 @@
-/* ============ lib.js：工具函数 + 存储层 ============ */
+/* ============ lib.js：工具函数 + 存储层 + 纯业务逻辑 ============ */
 
 /* ---------- 基础工具 ---------- */
 function parseDateStr(str) {
@@ -26,6 +26,14 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+/* 两种项目类型：daily = 每日打卡（按日期），list = 记录清单（一行一条） */
+const TYPE_DAILY = 'daily';
+const TYPE_LIST = 'list';
+
+function getHabitType(habit) {
+  return habit && habit.type === TYPE_LIST ? TYPE_LIST : TYPE_DAILY;
 }
 
 /* ---------- 存储适配器（Capacitor Preferences / localStorage） ---------- */
@@ -135,12 +143,84 @@ const FileSaver = (() => {
 /* ---------- 日期缓存 ---------- */
 const dateListCache = new Map();
 
+/* ---------- 记录清单：条目读写 ---------- */
+const LIST_ITEM_MAX = 60;
+
+function newItemId() {
+  return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function normalizeItem(it) {
+  if (!it || typeof it !== 'object') return null;
+  const text = typeof it.text === 'string' ? it.text.trim().slice(0, LIST_ITEM_MAX) : '';
+  if (!text) return null;
+  return {
+    id: (typeof it.id === 'string' && it.id) ? it.id : newItemId(),
+    text,
+    done: !!it.done,
+    locked: !!it.locked,
+    createdAt: (typeof it.createdAt === 'string' && it.createdAt) ? it.createdAt : formatDate(new Date())
+  };
+}
+
+function getListItem(habit, itemId) {
+  return (habit.items || []).find(it => it.id === itemId) || null;
+}
+
+function addListItem(habit, text) {
+  if (!Array.isArray(habit.items)) habit.items = [];
+  const t = String(text || '').trim().slice(0, LIST_ITEM_MAX);
+  if (!t) return null;
+  const item = { id: newItemId(), text: t, done: false, locked: false, createdAt: formatDate(new Date()) };
+  habit.items.push(item);
+  return item;
+}
+
+function removeListItem(habit, itemId) {
+  if (!Array.isArray(habit.items)) return false;
+  const idx = habit.items.findIndex(it => it.id === itemId);
+  if (idx === -1) return false;
+  habit.items.splice(idx, 1);
+  return true;
+}
+
+function toggleListItemDone(habit, itemId) {
+  const item = getListItem(habit, itemId);
+  if (!item) return false;
+  item.done = !item.done;
+  return true;
+}
+
+function toggleListItemLock(habit, itemId) {
+  const item = getListItem(habit, itemId);
+  if (!item) return false;
+  item.locked = !item.locked;
+  return true;
+}
+
+function setListItemText(habit, itemId, text) {
+  const item = getListItem(habit, itemId);
+  if (!item) return false;
+  const t = String(text || '').trim().slice(0, LIST_ITEM_MAX);
+  if (!t) return false;
+  item.text = t;
+  return true;
+}
+
+/* 清单进度：只给纯数字，不带任何场景化文案 */
+function getListStats(habit) {
+  const items = habit.items || [];
+  return { total: items.length, done: items.filter(it => it.done).length };
+}
+
 /* ---------- 数据规范化 ---------- */
 function normalizeHabit(habit, index) {
   if (!habit || typeof habit !== 'object') return null;
   if (habit.dailyTwice === true && !habit.mode) habit.mode = 'twice';
+  // 老数据没有 type → 一律当每日打卡，行为完全不变
+  habit.type = (habit.type === TYPE_LIST) ? TYPE_LIST : TYPE_DAILY;
   if (!habit.mode || !['single', 'twice', 'thrice'].includes(habit.mode)) habit.mode = 'single';
-  if (typeof habit.name !== 'string' || !habit.name.trim()) habit.name = '未命名打卡';
+  if (typeof habit.name !== 'string' || !habit.name.trim()) habit.name = '未命名';
   if (typeof habit.startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(habit.startDate)) {
     habit.startDate = formatDate(new Date());
   }
@@ -157,6 +237,10 @@ function normalizeHabit(habit, index) {
   }
   if (habit.order === undefined || typeof habit.order !== 'number') habit.order = index;
   if (!Array.isArray(habit.expandedMonths)) habit.expandedMonths = [];
+  if (habit.type === TYPE_LIST) {
+    if (!Array.isArray(habit.items)) habit.items = [];
+    habit.items = habit.items.map(normalizeItem).filter(Boolean);
+  }
   delete habit.dailyTwice;
   delete habit._dateCache;
   return habit;
@@ -164,6 +248,7 @@ function normalizeHabit(habit, index) {
 
 /* ---------- 折叠月份补全 / 频率迁移 / 去重指纹 ---------- */
 function ensureExpandedMonths(habit) {
+  if (getHabitType(habit) === TYPE_LIST) return;   // 记录清单没有月份概念
   if (Array.isArray(habit.expandedMonths) && habit.expandedMonths.length > 0) return;
   const dates = getDates(habit.startDate, habit.totalDays);
   const todayMonth = formatDate(new Date()).substring(0, 7);
@@ -215,8 +300,14 @@ function migrateModeData(habit, newMode, newSlotNames) {
 
 /* 导入时判断"这条记录是否已存在"，忽略 order 等易变字段 */
 function habitSignature(h) {
+  if (getHabitType(h) === TYPE_LIST) {
+    return JSON.stringify([
+      TYPE_LIST, h.name,
+      (h.items || []).map(it => [it.text, !!it.done])
+    ]);
+  }
   return JSON.stringify([
-    h.name, h.startDate, h.totalDays, h.mode,
+    TYPE_DAILY, h.name, h.startDate, h.totalDays, h.mode,
     h.slotNames || [], h.completedDates || [],
     h.completedCounts || {}, h.notes || {}
   ]);
