@@ -392,7 +392,10 @@ async function deleteHabit(i, habitRef) {
   if (!h[idx]) return;
   if (!(await showConfirm('确定要删除「' + h[idx].name + '」吗？', '删除项目'))) return;
   const removed = h.splice(idx, 1)[0];
-  if (removed && removed.id) cancelHabitReminders(removed.id);
+  if (removed && removed.id) {
+    cancelHabitReminders(removed.id);
+    if (muteCache[removed.id]) { delete muteCache[removed.id]; saveMutes(); }
+  }
   saveHabits(h);
   renderHabits();
   showUndoBar(removed, idx);
@@ -1457,6 +1460,52 @@ const REMIND_ID_BASE = 20000;
 let notifyPermission = false;
 let reminderTimer = null;
 
+/* 「今天不再提醒」要记住，否则下次回前台续排时又会被排回来 */
+const MUTE_KEY = 'checkin_mutes_v1';   // { habitId: { 'YYYY-MM-DD': 1 } }
+let muteCache = {};
+
+async function loadMutes() {
+  try {
+    const raw = await Storage.get(MUTE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    muteCache = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  } catch (e) {
+    console.warn('[提醒] 读取静音记录失败', e);
+    muteCache = {};
+  }
+}
+
+async function saveMutes() {
+  try { await Storage.set(MUTE_KEY, JSON.stringify(muteCache)); }
+  catch (e) { console.warn('[提醒] 保存静音记录失败', e); }
+}
+
+/* 清掉过期记录，避免文件越堆越大 */
+function pruneMutes(todayStr) {
+  let changed = false;
+  Object.keys(muteCache).forEach(id => {
+    const days = muteCache[id];
+    if (!days || typeof days !== 'object') { delete muteCache[id]; changed = true; return; }
+    Object.keys(days).forEach(d => {
+      if (d < todayStr) { delete days[d]; changed = true; }
+    });
+    if (!Object.keys(days).length) { delete muteCache[id]; changed = true; }
+  });
+  return changed;
+}
+
+function isMuted(habitId, dateStr) {
+  const days = muteCache[habitId];
+  return !!(days && days[dateStr]);
+}
+
+async function muteDay(habitId, dateStr) {
+  if (!habitId || !dateStr) return;
+  if (!muteCache[habitId]) muteCache[habitId] = {};
+  muteCache[habitId][dateStr] = 1;
+  await saveMutes();
+}
+
 function getNotifyPlugin() {
   if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
     return Capacitor.Plugins.LocalNotifications;
@@ -1551,12 +1600,13 @@ async function cancelSlotReminders(habitId, dateStr, slotIndex) {
   await cancelNotifications(targets);
 }
 
-/* 通知上点「今天不再提醒」：这个项目当天所有时段都取消 */
+/* 通知上点「今天不再提醒」：这个项目当天所有时段都取消，并记下来别再排 */
 async function cancelDayReminders(habitId, dateStr) {
   if (!habitId) return;
   const targets = (await getCheckinPending()).filter(n =>
     n.extra.checkinHabitId === habitId && n.extra.checkinDate === dateStr);
   await cancelNotifications(targets);
+  await muteDay(habitId, dateStr);
 }
 
 function isDateInHabit(habit, dateStr) {
@@ -1590,6 +1640,7 @@ async function rescheduleAllReminders() {
         base.setDate(base.getDate() + d);
         const dateStr = formatDate(base);
         if (!isDateInHabit(h, dateStr)) continue;
+        if (isMuted(h.id, dateStr)) continue;            // 点过「今天不再提醒」
         if (getDayStatus(h, dateStr)[s]) continue;     // 该时段已经打过卡
         for (let k = 0; k < REMIND_MAX_TIMES; k++) {
           const at = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, mm + k * REMIND_GAP_MIN, 0, 0);
@@ -1643,6 +1694,8 @@ async function initReminders() {
   const LN = getNotifyPlugin();
   if (!LN) return;
   await setupReminderChannel();
+  await loadMutes();
+  if (pruneMutes(formatDate(new Date()))) await saveMutes();
   notifyPermission = await ensureNotifyPermission(true);
   if (notifyPermission) await rescheduleAllReminders();
 }
