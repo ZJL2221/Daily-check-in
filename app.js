@@ -1649,7 +1649,8 @@ const REMIND_GAP_MIN = 10;       // 没打卡时重复提醒的间隔（分钟�
 const REMIND_MAX_TIMES = 3;      // 每个时段最多提醒几次（含第一次）
 const REMIND_MAX_TOTAL = 300;    // 一次最多排多少条，防止通知过多
 const REMIND_ACTION_TYPE = 'CHECKIN_REMIND';
-const REMIND_CHANNEL = 'checkin-remind';   // 自己的高优先级通道，才会横幅弹出
+const REMIND_CHANNEL = 'checkin-remind-v2';   // 自己的高优先级通道，才会横幅弹出
+const REMIND_CHANNEL_OLD = 'checkin-remind';  // 上一版建错的（无声音），启动时清掉
 const REMIND_ID_BASE = 20000;
 
 let notifyPermission = false;
@@ -1779,6 +1780,47 @@ function fmtStamp(ms) {
   return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
 
+/* 读「打卡提醒」这个通知通道的真实设置：重要性低或没声音，就会「响了你也听不见」 */
+async function getChannelInfo() {
+  const LN = getNotifyPlugin();
+  if (!LN || typeof LN.listChannels !== 'function') return null;
+  try {
+    const res = await LN.listChannels();
+    const list = (res && res.channels) || [];
+    return list.filter(c => c.id === REMIND_CHANNEL)[0] || null;
+  } catch (e) {
+    console.warn('[提醒] 读取通知通道失败', e);
+    return null;
+  }
+}
+
+function channelDesc(ch) {
+  if (!ch) return '不存在（会退回系统默认通道）';
+  const imp = { 0: '关闭', 1: '最低', 2: '低', 3: '普通(不弹横幅)', 4: '高', 5: '最高' }[ch.importance];
+  const snd = ch.sound ? '有' : '无';
+  return '重要性' + (imp || ch.importance) + ' / 声音' + snd + ' / 震动' + (ch.vibration ? '开' : '关');
+}
+
+async function rebuildChannel() {
+  const LN = getNotifyPlugin();
+  if (!LN) return;
+  try {
+    if (typeof LN.deleteChannel === 'function') await LN.deleteChannel({ id: REMIND_CHANNEL });
+  } catch (e) { /* 没有就算了 */ }
+  try {
+    await LN.createChannel({
+      id: REMIND_CHANNEL,
+      name: '打卡提醒',
+      description: '到点提醒你打卡',
+      importance: 5,
+      visibility: 1,
+      vibration: true
+    });
+  } catch (e) {
+    alert('重建通道失败：' + (e && e.message ? e.message : e));
+  }
+}
+
 async function showReminderStatus() {
   const LN = getNotifyPlugin();
   // 说明弹窗盖着确认框，先收起来
@@ -1802,10 +1844,12 @@ async function showReminderStatus() {
   } catch (e) { /* 忽略 */ }
 
   const ua = (navigator.userAgent || '').match(/Android\s+([\d.]+)/);
+  const ch = await getChannelInfo();
   const lines = [
     '系统：' + (ua ? 'Android ' + ua[1] : '非安卓'),
     '通知权限：' + (perm && perm.display === 'granted' ? '已允许' : '未允许'),
     '精确闹钟：' + (exactAlarmOk ? '已允许' : '未允许（提醒会被攒着发）'),
+    '通知通道：' + channelDesc(ch),
     '已排提醒：' + count + ' 条' + (nextAt ? '，下一条 ' + fmtStamp(nextAt) : '')
   ];
   if (lastScheduleInfo) {
@@ -1829,6 +1873,21 @@ async function showReminderStatus() {
     return;
   }
 
+  // 通道被系统或用户改成了「不弹横幅 / 没声音」：提醒其实来了，只是你没察觉
+  const chBad = !ch || ch.importance <= 3 || !ch.sound;
+  if (chBad) {
+    const yes = await showConfirm(
+      lines.join('\n') + '\n\n这个通知通道现在是「不弹横幅 / 没声音」状态，\n提醒可能真的发了，只是你听不到也看不见。\n\n要重建这个通道吗？（会恢复成高优先级 + 响铃）',
+      '提醒设置'
+    );
+    if (yes) {
+      await rebuildChannel();
+      await rescheduleAllReminders();
+      alert('通道已重建。\n再点一次「提醒设置」确认：重要性应为「高」、声音「有」。');
+    }
+    return;
+  }
+
   const redo = await showConfirm(lines.join('\n') + '\n\n要清掉重排一次吗？（能刷出最新数字）', '提醒设置');
   if (!redo) return;
   await rescheduleAllReminders();
@@ -1844,6 +1903,8 @@ async function setupReminderChannel() {
   if (!LN) return;
   // 插件自带的 Default 通道是「普通」级别，只在通知栏躺着、不弹横幅。
   // 自己建一个高级别通道，到点会亮屏弹出来，才不会被当成没提醒。
+  // 注意：不要传 sound —— 插件会把 sound 直接拼成 android.resource://包名/raw/<名字>，
+  // 传 'default' 会指向一个不存在的资源，通道反而被设成无声。不传才是系统默认铃声。
   try {
     if (typeof LN.createChannel === 'function') {
       await LN.createChannel({
@@ -1852,13 +1913,16 @@ async function setupReminderChannel() {
         description: '到点提醒你打卡',
         importance: 5,          // 5 = 高，允许横幅与提示音
         visibility: 1,          // 锁屏上显示
-        vibration: true,
-        sound: 'default'
+        vibration: true
       });
     }
   } catch (e) {
     console.warn('[提醒] 创建通知通道失败（可能已存在）', e);
   }
+  // 清掉上一版建错的无声通道（Android 通道属性建好就不能改，只能换 id）
+  try {
+    if (typeof LN.deleteChannel === 'function') await LN.deleteChannel({ id: REMIND_CHANNEL_OLD });
+  } catch (e) { /* 没有就算了 */ }
   try {
     await LN.registerActionTypes({
       types: [{
@@ -2082,7 +2146,7 @@ function setupResumeReschedule() {
   });
 }
 
-/* 测试用：60 秒后弹一条，专门用来验「锁屏/杀后台还能不能响」 */
+/* 测试用：10 秒后弹一条，方便立刻验 */
 async function testReminder() {
   const LN = getNotifyPlugin();
   closeHelpModal();
@@ -2096,13 +2160,13 @@ async function testReminder() {
     await LN.schedule({
       notifications: [{
         id: 19999,
-        title: '测试提醒（60 秒后）',
-        body: '息屏状态下收到这条 = 提醒通路真的通了',
+        title: '测试提醒（10 秒后）',
+        body: '这条响了说明闹钟通路正常；没听见就拉下通知栏看看有没有',
         channelId: REMIND_CHANNEL,
-        schedule: { at: new Date(Date.now() + 60000), allowWhileIdle: true }
+        schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }
       }]
     });
-    alert('已排一条 60 秒后的提醒。\n\n现在请这样做：\n① 锁屏\n② 手机放下别碰\n③ 等 1 分钟\n\n盯着 App 看不算数 —— 前台一定响，测不出问题。');
+    alert('10 秒后会响。\n\n要测「息屏能不能响」，请现在按电源键锁屏、把手机放下。\n如果没听到声音，等会儿把通知栏拉下来看看 —— \n有没有一条时间戳正好是刚才的时间。');
   } catch (e) {
     alert('测试失败：' + (e && e.message ? e.message : e));
   }
