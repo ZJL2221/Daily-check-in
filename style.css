@@ -513,12 +513,14 @@ body {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.reminder-row input[type="time"] {
+.reminder-row .reminder-time {
   flex: 1; min-width: 0; padding: 9px 10px; border: 2px solid #eee;
   border-radius: 10px; font-size: 14px; font-family: inherit;
-  background: white; color: #333;
+  background: white; color: #333; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
-.reminder-row input[type="time"]:focus { outline: none; border-color: #667eea; }
+.reminder-row .reminder-time:focus { outline: none; border-color: #667eea; }
+.reminder-row .reminder-time::placeholder { color: #bbb; font-size: 13px; }
 
 .reminder-clear {
   width: 30px; height: 30px; flex-shrink: 0; border: none; border-radius: 50%;
@@ -529,6 +531,67 @@ body {
 
 @media (prefers-color-scheme: dark) {
   .reminder-row .reminder-label { color: #a0aec0; }
-  .reminder-row input[type="time"] { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+  .reminder-row .reminder-time { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+  .reminder-row .reminder-time::placeholder { color: #6b7280; }
   .reminder-clear { background: #3a4556; color: #cbd5e0; }
+}
+
+/* ---------- 时间选择弹窗（输入 + 双针表盘） ---------- */
+.tp-modal { max-width: 330px; }
+.tp-input-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px; margin: 2px 0 6px;
+}
+.tp-modal .tp-num {
+  width: 74px; padding: 6px 4px; text-align: center;
+  border: 2px solid #eee; border-radius: 12px;
+  font-size: 30px; font-weight: 700; font-family: inherit;
+  background: white; color: #333;
+  -webkit-tap-highlight-color: transparent;
+}
+.tp-modal .tp-num:focus { outline: none; border-color: #667eea; }
+.tp-colon { font-size: 26px; font-weight: 700; color: #bbb; }
+.tp-unit { font-size: 11px; color: #aaa; margin-left: 4px; }
+.tp-legend {
+  display: flex; align-items: center; justify-content: center;
+  gap: 5px; flex-wrap: wrap;
+  font-size: 11px; color: #999; margin-bottom: 8px;
+}
+.tp-key { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.tp-key-hour { background: #667eea; }
+.tp-key-min { background: #ff8f5e; margin-left: 8px; }
+.tp-dial-wrap { display: flex; justify-content: center; }
+.tp-dial {
+  width: 100%; max-width: 272px; height: auto;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.tp-face { fill: #fafbff; stroke: #eee; stroke-width: 2; }
+.tp-tick-hour { stroke: #d8dbe6; stroke-width: 2; stroke-linecap: round; }
+.tp-tick-hour.tp-major { stroke: #b9bfd0; stroke-width: 3; }
+.tp-tick-min { stroke: #eceef5; stroke-width: 1.4; stroke-linecap: round; }
+.tp-tick-min.tp-major { stroke: #cfd4e2; stroke-width: 2.4; }
+.tp-num-hour { font-size: 12px; font-weight: 600; fill: #6b7280; }
+.tp-num-min { font-size: 9px; fill: #a5abba; }
+.tp-hand { stroke-linecap: round; }
+.tp-hand-hour { stroke: #667eea; stroke-width: 5; }
+.tp-hand-min { stroke: #ff8f5e; stroke-width: 4; }
+.tp-hand-dot { stroke: white; stroke-width: 2; }
+.tp-hand-dot-hour { fill: #667eea; }
+.tp-hand-dot-min { fill: #ff8f5e; }
+.tp-pivot { fill: #667eea; }
+
+@media (prefers-color-scheme: dark) {
+  .tp-modal .tp-num { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+  .tp-colon { color: #6b7280; }
+  .tp-unit { color: #6b7280; }
+  .tp-legend { color: #8b95a8; }
+  .tp-face { fill: #161d29; stroke: #2d3748; }
+  .tp-tick-hour { stroke: #4a5568; }
+  .tp-tick-hour.tp-major { stroke: #718096; }
+  .tp-tick-min { stroke: #2f3a4d; }
+  .tp-tick-min.tp-major { stroke: #4a5568; }
+  .tp-num-hour { fill: #cbd5e0; }
+  .tp-num-min { fill: #7c8798; }
+  .tp-hand-dot { stroke: #161d29; }
 }

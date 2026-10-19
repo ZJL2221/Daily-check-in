@@ -181,6 +181,47 @@
   </div>
 </div>
 
+<!-- 时间选择弹窗：上面输入，下面双指针表盘（外圈时 / 内圈分） -->
+<div class="modal-overlay" id="timePickerModal">
+  <div class="modal tp-modal">
+    <h2>设置提醒时间</h2>
+
+    <div class="tp-input-row">
+      <input type="text" id="tpHour" class="tp-num" inputmode="numeric" maxlength="2" aria-label="小时"
+             oninput="onTpInput(true)" onblur="normalizeTpInput(true)">
+      <span class="tp-colon">:</span>
+      <input type="text" id="tpMinute" class="tp-num" inputmode="numeric" maxlength="2" aria-label="分钟"
+             oninput="onTpInput(false)" onblur="normalizeTpInput(false)">
+      <span class="tp-unit">24 小时制</span>
+    </div>
+
+    <div class="tp-legend">
+      <span class="tp-key tp-key-hour"></span>紫针拖外圈 = 时
+      <span class="tp-key tp-key-min"></span>橙针拖内圈 = 分
+    </div>
+
+    <div class="tp-dial-wrap">
+      <svg id="tpDial" viewBox="0 0 260 260" class="tp-dial" aria-label="时间表盘">
+        <circle class="tp-face" cx="130" cy="130" r="126"></circle>
+        <g id="tpHourTicks"></g>
+        <g id="tpMinTicks"></g>
+        <g id="tpHourNums"></g>
+        <g id="tpMinNums"></g>
+        <line id="tpHourHand" class="tp-hand tp-hand-hour" x1="130" y1="130" x2="130" y2="42"></line>
+        <circle id="tpHourDot" class="tp-hand-dot tp-hand-dot-hour" cx="130" cy="12" r="7"></circle>
+        <line id="tpMinHand" class="tp-hand tp-hand-min" x1="130" y1="130" x2="130" y2="84"></line>
+        <circle id="tpMinDot" class="tp-hand-dot tp-hand-dot-min" cx="130" cy="54" r="6"></circle>
+        <circle class="tp-pivot" cx="130" cy="130" r="6"></circle>
+      </svg>
+    </div>
+
+    <div class="modal-btns">
+      <button class="btn btn-cancel" onclick="closeTimePicker()">取消</button>
+      <button class="btn btn-confirm" onclick="confirmTimePicker()">确定</button>
+    </div>
+  </div>
+</div>
+
 <!-- 使用说明弹窗 -->
 <div class="modal-overlay" id="helpModal">
   <div class="modal">

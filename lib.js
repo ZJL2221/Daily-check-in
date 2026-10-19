@@ -159,6 +159,14 @@ function isValidTimeStr(s) {
   return typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
 }
 
+/* 表盘角度（0 = 12 点方向，顺时针为正）换算成时/分 */
+function dialAngleToHour(deg) {
+  return ((Math.round(deg / 15) % 24) + 24) % 24;
+}
+function dialAngleToMinute(deg) {
+  return ((Math.round(deg / 6) % 60) + 60) % 60;
+}
+
 /* 每个时段一个提醒时间，'' 表示该时段不提醒；长度始终等于时段数 */
 function normalizeReminderTimes(habit) {
   const n = getSlotCount(habit.mode || 'single');

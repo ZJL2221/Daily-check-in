@@ -925,7 +925,7 @@ function renderReminderInputs(presetTimes) {
     const val = (presetTimes && presetTimes[i]) || '';
     html += '<div class="reminder-row">' +
       '<span class="reminder-label">' + escapeHtml(names[i] || ('时段' + (i + 1))) + '</span>' +
-      '<input type="time" id="reminderTime' + i + '" value="' + escapeHtml(val) + '">' +
+      '<input type="text" class="reminder-time" readonly placeholder="未设置" id="reminderTime' + i + '" value="' + escapeHtml(val) + '" onclick="openTimePicker(' + i + ')">' +
       '<button type="button" class="reminder-clear" onclick="clearReminderTime(' + i + ')" aria-label="不提醒">✕</button>' +
       '</div>';
   }
@@ -935,6 +935,203 @@ function renderReminderInputs(presetTimes) {
 function clearReminderTime(i) {
   const el = document.getElementById('reminderTime' + i);
   if (el) el.value = '';
+}
+
+/* ---------- 时间选择器：上面输入，下面双针表盘（外圈时 / 内圈分） ---------- */
+const TP_C = 130;              // 表盘圆心
+const TP_RING_SPLIT = 90;      // 半径大于它算外圈（时），小于算内圈（分）
+let tpSlot = -1;               // 正在设置第几个时段，-1 表示没开
+let tpHourVal = 0;
+let tpMinuteVal = 0;
+let tpDragMode = null;         // 'hour' | 'min' | null
+let tpBuilt = false;
+let tpBound = false;
+
+function tpNode(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.keys(attrs).forEach(k => el.setAttribute(k, attrs[k]));
+  return el;
+}
+
+/* 刻度只建一次，后面只转指针 */
+function buildTpDial() {
+  if (tpBuilt) return;
+  const hourTicks = document.getElementById('tpHourTicks');
+  const minTicks = document.getElementById('tpMinTicks');
+  const hourNums = document.getElementById('tpHourNums');
+  const minNums = document.getElementById('tpMinNums');
+  if (!hourTicks || !minTicks || !hourNums || !minNums) return;
+
+  const rad = deg => (deg - 90) * Math.PI / 180;
+
+  // 外圈：24 格小时刻度，偶数点加粗
+  for (let h = 0; h < 24; h++) {
+    const a = rad(h * 15);
+    const major = h % 2 === 0;
+    const r1 = major ? 111 : 116;
+    hourTicks.appendChild(tpNode('line', {
+      x1: TP_C + Math.cos(a) * r1, y1: TP_C + Math.sin(a) * r1,
+      x2: TP_C + Math.cos(a) * 126, y2: TP_C + Math.sin(a) * 126,
+      class: major ? 'tp-tick-hour tp-major' : 'tp-tick-hour'
+    }));
+  }
+  for (let h = 0; h < 24; h += 2) {
+    const a = rad(h * 15);
+    const t = tpNode('text', {
+      x: TP_C + Math.cos(a) * 100, y: TP_C + Math.sin(a) * 100,
+      class: 'tp-num-hour', 'text-anchor': 'middle', 'dominant-baseline': 'central'
+    });
+    t.textContent = String(h);
+    hourNums.appendChild(t);
+  }
+
+  // 内圈：60 格分钟刻度，5 的倍数加粗
+  for (let m = 0; m < 60; m++) {
+    const a = rad(m * 6);
+    const major = m % 5 === 0;
+    const r1 = major ? 72 : 75;
+    minTicks.appendChild(tpNode('line', {
+      x1: TP_C + Math.cos(a) * r1, y1: TP_C + Math.sin(a) * r1,
+      x2: TP_C + Math.cos(a) * 80, y2: TP_C + Math.sin(a) * 80,
+      class: major ? 'tp-tick-min tp-major' : 'tp-tick-min'
+    }));
+  }
+  for (let m = 0; m < 60; m += 10) {
+    const a = rad(m * 6);
+    const t = tpNode('text', {
+      x: TP_C + Math.cos(a) * 64, y: TP_C + Math.sin(a) * 64,
+      class: 'tp-num-min', 'text-anchor': 'middle', 'dominant-baseline': 'central'
+    });
+    t.textContent = String(m);
+    minNums.appendChild(t);
+  }
+
+  tpBuilt = true;
+}
+
+function renderTpHands() {
+  const rot = (id, deg) => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('transform', 'rotate(' + deg + ' ' + TP_C + ' ' + TP_C + ')');
+  };
+  rot('tpHourHand', tpHourVal * 15);
+  rot('tpHourDot', tpHourVal * 15);
+  rot('tpMinHand', tpMinuteVal * 6);
+  rot('tpMinDot', tpMinuteVal * 6);
+}
+
+function syncTpInputs(force) {
+  const h = document.getElementById('tpHour');
+  const m = document.getElementById('tpMinute');
+  if (h && (force || document.activeElement !== h)) h.value = String(tpHourVal).padStart(2, '0');
+  if (m && (force || document.activeElement !== m)) m.value = String(tpMinuteVal).padStart(2, '0');
+}
+
+/* 手指位置 → 角度；角度 → 时/分 */
+function tpPoint(ev) {
+  const svg = document.getElementById('tpDial');
+  const rect = svg.getBoundingClientRect();
+  const w = rect.width || 260;
+  const h = rect.height || 260;
+  const x = (ev.clientX - rect.left) * 260 / w;
+  const y = (ev.clientY - rect.top) * 260 / h;
+  const dx = x - TP_C;
+  const dy = y - TP_C;
+  return {
+    r: Math.sqrt(dx * dx + dy * dy),
+    a: (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360
+  };
+}
+
+function tpApplyPoint(ev, mode) {
+  const p = tpPoint(ev);
+  if (mode === 'hour') {
+    tpHourVal = dialAngleToHour(p.a);
+  } else {
+    tpMinuteVal = dialAngleToMinute(p.a);
+  }
+  renderTpHands();
+  syncTpInputs(false);
+}
+
+function bindTpPointer() {
+  if (tpBound) return;
+  const svg = document.getElementById('tpDial');
+  if (!svg || !svg.addEventListener) return;
+  const end = () => { tpDragMode = null; };
+
+  svg.addEventListener('pointerdown', ev => {
+    const p = tpPoint(ev);
+    tpDragMode = p.r < TP_RING_SPLIT ? 'min' : 'hour';
+    if (svg.setPointerCapture) {
+      try { svg.setPointerCapture(ev.pointerId); } catch (e) { /* 老 WebView 不支持就算了 */ }
+    }
+    if (ev.preventDefault) ev.preventDefault();
+    tpApplyPoint(ev, tpDragMode);
+  });
+  svg.addEventListener('pointermove', ev => {
+    if (!tpDragMode) return;
+    if (ev.preventDefault) ev.preventDefault();
+    tpApplyPoint(ev, tpDragMode);
+  });
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+  svg.addEventListener('pointerleave', () => { if (tpDragMode) tpDragMode = null; });
+  tpBound = true;
+}
+
+function onTpInput(isHour) {
+  const el = document.getElementById(isHour ? 'tpHour' : 'tpMinute');
+  if (!el) return;
+  const raw = String(el.value || '').replace(/[^0-9]/g, '').slice(0, 2);
+  el.value = raw;
+  const max = isHour ? 23 : 59;
+  const v = raw === '' ? 0 : Math.min(parseInt(raw, 10) || 0, max);
+  if (isHour) tpHourVal = v; else tpMinuteVal = v;
+  renderTpHands();
+}
+
+function normalizeTpInput(isHour) {
+  const el = document.getElementById(isHour ? 'tpHour' : 'tpMinute');
+  if (!el) return;
+  const max = isHour ? 23 : 59;
+  const v = Math.min(Math.max(parseInt(el.value, 10) || 0, 0), max);
+  if (isHour) tpHourVal = v; else tpMinuteVal = v;
+  el.value = String(v).padStart(2, '0');
+  renderTpHands();
+}
+
+function openTimePicker(i) {
+  const el = document.getElementById('reminderTime' + i);
+  tpSlot = i;
+  if (el && isValidTimeStr(el.value)) {
+    tpHourVal = parseInt(el.value.substring(0, 2), 10);
+    tpMinuteVal = parseInt(el.value.substring(3, 5), 10);
+  } else {
+    const now = new Date();
+    tpHourVal = now.getHours();
+    tpMinuteVal = now.getMinutes();
+  }
+  buildTpDial();
+  bindTpPointer();
+  renderTpHands();
+  syncTpInputs(true);
+  document.getElementById('timePickerModal').classList.add('active');
+}
+
+function closeTimePicker() {
+  document.getElementById('timePickerModal').classList.remove('active');
+  tpSlot = -1;
+  tpDragMode = null;
+}
+
+function confirmTimePicker() {
+  const slot = tpSlot;
+  closeTimePicker();
+  if (slot < 0) return;
+  const el = document.getElementById('reminderTime' + slot);
+  if (!el) return;
+  el.value = String(tpHourVal).padStart(2, '0') + ':' + String(tpMinuteVal).padStart(2, '0');
 }
 
 function openModal() {
@@ -1435,6 +1632,7 @@ document.getElementById('importModal').addEventListener('click', function (e) {
 
 /* ---------- 返回键：有弹窗先关弹窗，没弹窗才退出 App ---------- */
 function closeTopModal() {
+  if (document.getElementById('timePickerModal').classList.contains('active')) { closeTimePicker(); return true; }
   if (document.getElementById('confirmModal').classList.contains('active')) { closeConfirm(false); return true; }
   if (document.getElementById('importModal').classList.contains('active')) { closeImportChoice(null); return true; }
   if (document.getElementById('itemModal').classList.contains('active')) { closeItemModal(); return true; }
