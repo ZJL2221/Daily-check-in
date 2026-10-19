@@ -1624,6 +1624,7 @@ document.getElementById('importModal').addEventListener('click', function (e) {
 
 /* ---------- 返回键：有弹窗先关弹窗，没弹窗才退出 App ---------- */
 function closeTopModal() {
+  if (document.getElementById('syncModal').classList.contains('active')) return true;  // 同步中不许返回关掉
   if (document.getElementById('timePickerModal').classList.contains('active')) { closeTimePicker(); return true; }
   if (document.getElementById('confirmModal').classList.contains('active')) { closeConfirm(false); return true; }
   if (document.getElementById('importModal').classList.contains('active')) { closeImportChoice(null); return true; }
@@ -1850,10 +1851,11 @@ async function showReminderStatus() {
     '通知权限：' + (perm && perm.display === 'granted' ? '已允许' : '未允许'),
     '精确闹钟：' + (exactAlarmOk ? '已允许' : '未允许（提醒会被攒着发）'),
     '通知通道：' + channelDesc(ch),
-    '已排提醒：' + count + ' 条' + (nextAt ? '，下一条 ' + fmtStamp(nextAt) : '')
+    '系统回查：' + count + ' 条' + (nextAt ? '，下一条 ' + fmtStamp(nextAt) : '')
   ];
   if (lastScheduleInfo) {
-    lines.push('上次排：计划 ' + lastScheduleInfo.planned + ' 条 / 成功 ' + lastScheduleInfo.scheduled + ' 条（' + fmtStamp(lastScheduleInfo.at) + '）');
+    lines.push('本次排入：' + lastScheduleInfo.scheduled + ' / ' + lastScheduleInfo.planned
+      + ' 条（' + fmtStamp(lastScheduleInfo.at) + '）');
     if (lastScheduleInfo.warning) lines.push('⚠️ ' + lastScheduleInfo.warning);
     if (lastScheduleInfo.error) lines.push('❌ 报错：' + lastScheduleInfo.error);
   }
@@ -1862,10 +1864,15 @@ async function showReminderStatus() {
   const hasAnyTime = getHabits().some(h =>
     getHabitType(h) === TYPE_DAILY && (h.reminderTimes || []).some(t => isValidTimeStr(t))
   );
+  const lastOk = lastScheduleInfo ? lastScheduleInfo.scheduled : 0;
   if (count === 0 && !hasAnyTime) {
     lines.push('');
     lines.push('（现在没有任何项目填过提醒时间，所以 0 条是正常的。');
     lines.push('到项目的「编辑」窗口里，在时段下面填一个时间试试）');
+  } else if (count === 0 && hasAnyTime && lastOk > 0) {
+    lines.push('');
+    lines.push('本机记录排进了 ' + lastOk + ' 条，但系统回查是 0 —— 多半还没落盘。');
+    lines.push('过几秒再点一次「提醒设置」看看，数字出来了就正常。');
   } else if (count === 0 && hasAnyTime) {
     lines.push('');
     lines.push('⚠️ 有项目填了提醒时间，却一条都没排上 —— 这是异常。');
@@ -2097,34 +2104,95 @@ async function rescheduleAllReminders() {
   lastScheduleInfo.nextAt = picked.length ? picked[0].at.getTime() : null;
 }
 
-/* 保存/修改完项目后走这一条：要权限 → 真排一遍 → 把结果摊开 */
+/* ---------- 保存后的「正在和系统对接」弹窗 ---------- */
+let syncExactPending = false;
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function openSyncModal(text) {
+  const m = document.getElementById('syncModal');
+  if (!m) return;
+  document.getElementById('syncSpinner').style.display = '';
+  document.getElementById('syncBtns').style.display = 'none';
+  document.getElementById('syncTitle').textContent = '正在和系统对接…';
+  document.getElementById('syncText').textContent = text || '正在把提醒写进系统闹钟队列，请稍等，先别退出 App。';
+  m.classList.add('active');
+}
+
+function setSyncText(t) {
+  const el = document.getElementById('syncText');
+  if (el) el.textContent = t;
+}
+
+function finishSyncModal(text) {
+  document.getElementById('syncSpinner').style.display = 'none';
+  document.getElementById('syncTitle').textContent = '提醒已就位';
+  document.getElementById('syncText').textContent = text;
+  document.getElementById('syncBtns').style.display = '';
+}
+
+function closeSyncModal() {
+  document.getElementById('syncModal').classList.remove('active');
+  // 精确闹钟没开的话，等这个弹窗关了再问，免得两个弹窗叠一起
+  if (syncExactPending) {
+    syncExactPending = false;
+    askExactAlarmIfNeeded(true);
+  }
+}
+
+/* 保存/修改完项目后走这一条：要权限 → 真排一遍 → 回查 → 把结果摊开 */
 async function applyReminders(reminderTimes) {
   const hasTime = Array.isArray(reminderTimes) && reminderTimes.some(t => t);
   if (!hasTime) { await rescheduleAllReminders(); return; }
 
+  const started = Date.now();
+  openSyncModal();
+
   if (!notifyPermission) {
-    const yes = await showConfirm(
-      '到点提醒要在通知栏给你弹消息，需要「通知」权限。\n系统随后会弹一次授权框，点「允许」即可。',
-      '开启打卡提醒'
-    );
-    if (!yes) {
-      alert('没开通知权限，提醒不会响。\n之后可以在 右上角 ! → 提醒设置 里再开。');
-      return;
-    }
+    setSyncText('提醒要在通知栏弹出来，需要通知权限。\n下一步系统会弹一个授权框，请点「允许」。');
+    await sleep(350);
   }
+
   const ok = await ensureNotifyPermission(false);
   if (!ok) {
+    closeSyncModal();
     alert('通知权限被拒绝了，提醒不会响。\n请到 系统设置 → 应用 → 打卡工具 → 通知 里允许。');
     return;
   }
+
+  setSyncText('正在把提醒写进系统闹钟队列，请稍等，先别退出 App。');
   await refreshExactAlarm();
   await rescheduleAllReminders();
 
+  // 回查系统：给落盘一点时间，查不到就再试一次
+  let list = await getCheckinPending();
+  if (!list.length && lastScheduleInfo.scheduled > 0) {
+    await sleep(500);
+    list = await getCheckinPending();
+  }
+  const sysCount = list.length;
+
+  // 至少停 1.2 秒，让人看得见「确实对接过」
+  const elapsed = Date.now() - started;
+  if (elapsed < 1200) await sleep(1200 - elapsed);
+
   if (lastScheduleInfo.error) {
-    alert('排提醒失败：' + lastScheduleInfo.error);
+    finishSyncModal('排提醒失败：' + lastScheduleInfo.error + '\n\n稍后可以到右上角 ! → 提醒设置 里重排一次。');
     return;
   }
-  if (!exactAlarmOk) await askExactAlarmIfNeeded(true);
+
+  let text = '已排 ' + lastScheduleInfo.scheduled + ' 条提醒';
+  if (lastScheduleInfo.nextAt) text += '，最早 ' + fmtStamp(lastScheduleInfo.nextAt) + ' 会提醒';
+  text += '\n系统回查：' + sysCount + ' 条';
+  if (sysCount < lastScheduleInfo.scheduled) {
+    text += '\n（回查数字偏小只是还没完全落盘，已经排上的闹钟不受影响）';
+  }
+  if (!exactAlarmOk) {
+    text += '\n\n⚠️ 精确闹钟没开，锁屏后提醒可能不准时。';
+    syncExactPending = true;
+  }
+  text += '\n\n现在可以放心退出 App 了。';
+  finishSyncModal(text);
 }
 
 function scheduleRemindersSoon() {

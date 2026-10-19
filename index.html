@@ -181,6 +181,18 @@
   </div>
 </div>
 
+<!-- 保存后「正在和系统对接」的等待弹窗 -->
+<div class="modal-overlay" id="syncModal">
+  <div class="modal sync-modal">
+    <div class="sync-spinner" id="syncSpinner"></div>
+    <h2 id="syncTitle">正在和系统对接…</h2>
+    <div class="sync-text" id="syncText">正在把提醒写进系统闹钟队列，请稍等，先别退出 App。</div>
+    <div class="modal-btns" id="syncBtns" style="display:none">
+      <button class="btn btn-confirm" onclick="closeSyncModal()">完成</button>
+    </div>
+  </div>
+</div>
+
 <!-- 时间选择弹窗：上面输入，下面双指针表盘（外圈时 / 内圈分） -->
 <div class="modal-overlay" id="timePickerModal">
   <div class="modal tp-modal">
