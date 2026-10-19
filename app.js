@@ -286,6 +286,8 @@ function toggleSingleCheck(i, dateStr, e) {
   setDayStatus(h[i], dateStr, status);
   saveHabits(h);
   renderHabits();
+  if (status[0]) cancelSlotReminders(h[i].id, dateStr, 0);
+  else scheduleRemindersSoon();
 }
 
 function toggleSlotCheck(i, dateStr, slotIndex, e) {
@@ -300,6 +302,8 @@ function toggleSlotCheck(i, dateStr, slotIndex, e) {
   setDayStatus(h[i], dateStr, status);
   saveHabits(h);
   renderHabits();
+  if (status[slotIndex]) cancelSlotReminders(h[i].id, dateStr, slotIndex);
+  else scheduleRemindersSoon();
 }
 
 /* ---------- 长按检测（日期项）---------- */
@@ -388,9 +392,11 @@ async function deleteHabit(i, habitRef) {
   if (!h[idx]) return;
   if (!(await showConfirm('确定要删除「' + h[idx].name + '」吗？', '删除项目'))) return;
   const removed = h.splice(idx, 1)[0];
+  if (removed && removed.id) cancelHabitReminders(removed.id);
   saveHabits(h);
   renderHabits();
   showUndoBar(removed, idx);
+  scheduleRemindersSoon();
 }
 
 /* ---------- 天数增减（仅每日打卡） ---------- */
@@ -849,12 +855,14 @@ let typeLocked = false;           // 编辑时类型不可改
 let editingIndex = -1;
 
 function selectMode(mode) {
+  const prevTimes = currentReminderValues();   // 切频率前先记住已填的时间
   selectedMode = mode;
   // 注意：必须限定在 #modeSelector 内，否则会误改上面的"类型"选择器
   document.querySelectorAll('#modeSelector .mode-option').forEach(el => {
     el.classList.toggle('selected', el.dataset.value === mode);
   });
   renderSlotNameInputs();
+  renderReminderInputs(prevTimes);
 }
 
 function selectType(type, force) {
@@ -893,6 +901,39 @@ function renderSlotNameInputs(presetNames) {
   wrap.innerHTML = html;
 }
 
+/* ---------- 打卡提醒时间输入：每个时段一个，可留空 ---------- */
+function currentReminderValues() {
+  const n = getSlotCount(selectedMode);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const el = document.getElementById('reminderTime' + i);
+    out.push(el && el.value ? el.value : '');
+  }
+  return out;
+}
+
+function renderReminderInputs(presetTimes) {
+  const wrap = document.getElementById('reminderInputs');
+  if (!wrap) return;
+  const n = getSlotCount(selectedMode);
+  const names = selectedMode === 'single' ? ['打卡提醒'] : getDefaultSlotNames(selectedMode);
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    const val = (presetTimes && presetTimes[i]) || '';
+    html += '<div class="reminder-row">' +
+      '<span class="reminder-label">' + escapeHtml(names[i] || ('时段' + (i + 1))) + '</span>' +
+      '<input type="time" id="reminderTime' + i + '" value="' + escapeHtml(val) + '">' +
+      '<button type="button" class="reminder-clear" onclick="clearReminderTime(' + i + ')" aria-label="不提醒">✕</button>' +
+      '</div>';
+  }
+  wrap.innerHTML = html;
+}
+
+function clearReminderTime(i) {
+  const el = document.getElementById('reminderTime' + i);
+  if (el) el.value = '';
+}
+
 function openModal() {
   editingIndex = -1;
   document.getElementById('modalTitle').textContent = '添加';
@@ -903,6 +944,7 @@ function openModal() {
   selectType(TYPE_DAILY, true);
   selectMode('single');
   renderSlotNameInputs();
+  renderReminderInputs([]);
   document.getElementById('modal').classList.add('active');
 }
 
@@ -922,6 +964,7 @@ function openEditModal(i, e) {
     document.getElementById('totalDays').value = h[i].totalDays;
     selectMode(h[i].mode);
     renderSlotNameInputs(h[i].slotNames);
+    renderReminderInputs(h[i].reminderTimes || []);
   }
   document.getElementById('modal').classList.add('active');
 }
@@ -982,6 +1025,13 @@ function saveHabit() {
     }
   }
 
+  // 提醒时间：每个时段一个，留空 = 不提醒
+  const reminderTimes = [];
+  for (let i = 0; i < getSlotCount(mode); i++) {
+    const el = document.getElementById('reminderTime' + i);
+    reminderTimes.push(el && isValidTimeStr(el.value) ? el.value : '');
+  }
+
   if (editingIndex >= 0 && habits[editingIndex]) {
     const old = habits[editingIndex];
     // 必须在改写 mode/slotNames 之前迁移，否则读不到旧频率和旧时段名
@@ -992,6 +1042,7 @@ function saveHabit() {
     old.totalDays = totalDays;
     old.mode = mode;
     old.slotNames = slotNames;
+    old.reminderTimes = reminderTimes;
     const validDates = new Set(getDates(startDate, totalDays).map(d => d.dateStr));
     if (mode === 'single') {
       old.completedDates = (old.completedDates || []).filter(d => validDates.has(d));
@@ -1018,7 +1069,7 @@ function saveHabit() {
   } else {
     const created = {
       type: TYPE_DAILY,
-      name, startDate, totalDays, mode, slotNames,
+      name, startDate, totalDays, mode, slotNames, reminderTimes,
       completedDates: [], completedCounts: {}, notes: {},
       lockedDates: [], masterLocked: false, deleteLocked: false,
       expanded: true, expandedMonths: [], order: habits.length
@@ -1028,6 +1079,12 @@ function saveHabit() {
     saveHabits(habits);
     closeModal();
     renderHabits();
+  }
+
+  scheduleRemindersSoon();
+  // 第一次设提醒时顺便申请通知权限，用户同意后立刻重排
+  if (reminderTimes.some(t => t) && !notifyPermission) {
+    ensureNotifyPermission(false).then(ok => { if (ok) scheduleRemindersSoon(); });
   }
 }
 
@@ -1389,11 +1446,243 @@ function setupBackButton() {
   });
 }
 
+/* ============ 打卡提醒（本地通知） ============ */
+const REMIND_DAYS = 14;          // 每次打开 App 往后预排的天数
+const REMIND_GAP_MIN = 10;       // 没打卡时重复提醒的间隔（分钟）
+const REMIND_MAX_TIMES = 3;      // 每个时段最多提醒几次（含第一次）
+const REMIND_MAX_TOTAL = 300;    // 一次最多排多少条，防止通知过多
+const REMIND_ACTION_TYPE = 'CHECKIN_REMIND';
+const REMIND_ID_BASE = 20000;
+
+let notifyPermission = false;
+let reminderTimer = null;
+
+function getNotifyPlugin() {
+  if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+    return Capacitor.Plugins.LocalNotifications;
+  }
+  return null;
+}
+
+async function ensureNotifyPermission(silent) {
+  const LN = getNotifyPlugin();
+  if (!LN) return false;
+  try {
+    const cur = await LN.checkPermissions();
+    if (cur && cur.display === 'granted') { notifyPermission = true; return true; }
+    if (silent) { notifyPermission = false; return false; }
+    const asked = await LN.requestPermissions();
+    notifyPermission = !!(asked && asked.display === 'granted');
+    return notifyPermission;
+  } catch (e) {
+    console.warn('[提醒] 权限检查失败', e);
+    return false;
+  }
+}
+
+async function setupReminderChannel() {
+  const LN = getNotifyPlugin();
+  if (!LN) return;
+  try {
+    await LN.registerActionTypes({
+      types: [{
+        id: REMIND_ACTION_TYPE,
+        actions: [
+          { id: 'skipToday', title: '今天不再提醒' },
+          { id: 'open', title: '去打卡', foreground: true }
+        ]
+      }]
+    });
+  } catch (e) {
+    console.warn('[提醒] 注册通知按钮失败', e);
+  }
+  try {
+    LN.addListener('localNotificationActionPerformed', async ev => {
+      const extra = (ev && ev.notification && ev.notification.extra) || {};
+      if (ev && ev.actionId === 'skipToday' && extra.checkinHabitId && extra.checkinDate) {
+        await cancelDayReminders(extra.checkinHabitId, extra.checkinDate);
+        renderHabits();
+      }
+    });
+  } catch (e) {
+    console.warn('[提醒] 注册通知动作失败', e);
+  }
+}
+
+async function getCheckinPending() {
+  const LN = getNotifyPlugin();
+  if (!LN) return [];
+  try {
+    const res = await LN.getPending();
+    return ((res && res.notifications) || []).filter(n => n.extra && n.extra.checkinHabitId);
+  } catch (e) {
+    console.warn('[提醒] 读取待发通知失败', e);
+    return [];
+  }
+}
+
+async function cancelNotifications(list) {
+  const LN = getNotifyPlugin();
+  if (!LN || !list.length) return;
+  try {
+    await LN.cancel({ notifications: list.map(n => ({ id: n.id })) });
+  } catch (e) {
+    console.warn('[提醒] 取消通知失败', e);
+  }
+}
+
+async function cancelAllCheckinReminders() {
+  await cancelNotifications(await getCheckinPending());
+}
+
+async function cancelHabitReminders(habitId) {
+  if (!habitId) return;
+  const targets = (await getCheckinPending()).filter(n => n.extra.checkinHabitId === habitId);
+  await cancelNotifications(targets);
+}
+
+/* 打卡后：只取消该时段当天剩余提醒 */
+async function cancelSlotReminders(habitId, dateStr, slotIndex) {
+  if (!habitId) return;
+  const targets = (await getCheckinPending()).filter(n =>
+    n.extra.checkinHabitId === habitId &&
+    n.extra.checkinDate === dateStr &&
+    n.extra.checkinSlot === slotIndex);
+  await cancelNotifications(targets);
+}
+
+/* 通知上点「今天不再提醒」：这个项目当天所有时段都取消 */
+async function cancelDayReminders(habitId, dateStr) {
+  if (!habitId) return;
+  const targets = (await getCheckinPending()).filter(n =>
+    n.extra.checkinHabitId === habitId && n.extra.checkinDate === dateStr);
+  await cancelNotifications(targets);
+}
+
+function isDateInHabit(habit, dateStr) {
+  if (!habit.startDate || !habit.totalDays) return false;
+  if (dateStr < habit.startDate) return false;
+  const [y, m, d] = habit.startDate.split('-').map(Number);
+  const end = new Date(y, m - 1, d + habit.totalDays - 1);
+  return dateStr <= formatDate(end);
+}
+
+async function rescheduleAllReminders() {
+  const LN = getNotifyPlugin();
+  if (!LN) return;
+  await cancelAllCheckinReminders();
+
+  const now = Date.now();
+  const items = [];
+  getHabits().forEach(h => {
+    if (getHabitType(h) !== TYPE_DAILY) return;
+    if (h.masterLocked) return;                       // 全部锁定 = 不打扰
+    const slots = getSlotCount(h.mode || 'single');
+    for (let s = 0; s < slots; s++) {
+      const t = getSlotReminderTime(h, s);
+      if (!t) continue;
+      const hh = parseInt(t.substring(0, 2), 10);
+      const mm = parseInt(t.substring(3, 5), 10);
+      if (isNaN(hh) || isNaN(mm)) continue;
+      for (let d = 0; d < REMIND_DAYS; d++) {
+        const base = new Date();
+        base.setHours(0, 0, 0, 0);
+        base.setDate(base.getDate() + d);
+        const dateStr = formatDate(base);
+        if (!isDateInHabit(h, dateStr)) continue;
+        if (getDayStatus(h, dateStr)[s]) continue;     // 该时段已经打过卡
+        for (let k = 0; k < REMIND_MAX_TIMES; k++) {
+          const at = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, mm + k * REMIND_GAP_MIN, 0, 0);
+          if (at.getTime() <= now + 20000) continue;   // 已经过点/马上到，跳过
+          items.push({ habit: h, dateStr, slot: s, attempt: k, at });
+        }
+      }
+    }
+  });
+
+  items.sort((a, b) => a.at - b.at);
+  const picked = items.slice(0, REMIND_MAX_TOTAL);
+  const notifications = picked.map((it, idx) => {
+    const multi = getSlotCount(it.habit.mode || 'single') > 1;
+    const label = multi ? getSlotLabel(it.habit, it.slot) : '';
+    return {
+      id: REMIND_ID_BASE + idx,
+      title: '该打卡了：' + it.habit.name + (label ? ' · ' + label : ''),
+      body: it.attempt === 0 ? '点开完成今天的打卡' : '还没打卡，第 ' + (it.attempt + 1) + ' 次提醒',
+      schedule: { at: it.at, allowWhileIdle: true },
+      actionTypeId: REMIND_ACTION_TYPE,
+      extra: {
+        checkinHabitId: it.habit.id,
+        checkinDate: it.dateStr,
+        checkinSlot: it.slot,
+        checkinAttempt: it.attempt
+      }
+    };
+  });
+
+  for (let i = 0; i < notifications.length; i += 50) {
+    try {
+      await LN.schedule({ notifications: notifications.slice(i, i + 50) });
+    } catch (e) {
+      console.warn('[提醒] 排提醒失败', e);
+      break;
+    }
+  }
+}
+
+function scheduleRemindersSoon() {
+  clearTimeout(reminderTimer);
+  reminderTimer = setTimeout(async () => {
+    const ok = notifyPermission || await ensureNotifyPermission(true);
+    if (!ok) return;
+    await rescheduleAllReminders();
+  }, 600);
+}
+
+async function initReminders() {
+  const LN = getNotifyPlugin();
+  if (!LN) return;
+  await setupReminderChannel();
+  notifyPermission = await ensureNotifyPermission(true);
+  if (notifyPermission) await rescheduleAllReminders();
+}
+
+function setupResumeReschedule() {
+  const AppPlugin = (typeof Capacitor !== 'undefined' && Capacitor.Plugins) ? Capacitor.Plugins.App : null;
+  if (!AppPlugin || !AppPlugin.addListener) return;
+  AppPlugin.addListener('appStateChange', st => {
+    if (st && st.isActive) scheduleRemindersSoon();
+  });
+}
+
+/* 测试用：10 秒后弹一条通知，方便立刻验证通没通 */
+async function testReminder() {
+  const LN = getNotifyPlugin();
+  if (!LN) { alert('浏览器里没有本地通知，装到手机上才能测'); return; }
+  const ok = await ensureNotifyPermission(false);
+  if (!ok) { alert('通知权限没开。\n请到 系统设置 → 应用 → 打卡工具 → 通知，允许通知后重试。'); return; }
+  try {
+    await LN.schedule({
+      notifications: [{
+        id: 19999,
+        title: '测试提醒',
+        body: '能看到这条，说明打卡提醒已经通了',
+        schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }
+      }]
+    });
+    alert('10 秒后会弹一条通知，可以先退到后台等它');
+  } catch (e) {
+    alert('测试失败：' + e.message);
+  }
+}
+
 /* ---------- 启动 ---------- */
 document.addEventListener('DOMContentLoaded', async function () {
   await loadHabitsFromStorage();
   renderHabits(false);
   setupBackButton();
+  setupResumeReschedule();
+  await initReminders();
 
   setTimeout(() => {
     const data = JSON.stringify(habitsCache);

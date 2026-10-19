@@ -150,6 +150,30 @@ function newItemId() {
   return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+/* 项目唯一 id：提醒通知靠它定位，重排序/改名都不受影响 */
+function newHabitId() {
+  return 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function isValidTimeStr(s) {
+  return typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+}
+
+/* 每个时段一个提醒时间，'' 表示该时段不提醒；长度始终等于时段数 */
+function normalizeReminderTimes(habit) {
+  const n = getSlotCount(habit.mode || 'single');
+  const src = Array.isArray(habit.reminderTimes) ? habit.reminderTimes : [];
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(isValidTimeStr(src[i]) ? src[i] : '');
+  habit.reminderTimes = out;
+  return out;
+}
+
+function getSlotReminderTime(habit, slotIndex) {
+  const arr = habit.reminderTimes || [];
+  return isValidTimeStr(arr[slotIndex]) ? arr[slotIndex] : '';
+}
+
 function normalizeItem(it) {
   if (!it || typeof it !== 'object') return null;
   const text = typeof it.text === 'string' ? it.text.trim().slice(0, LIST_ITEM_MAX) : '';
@@ -219,6 +243,7 @@ function normalizeHabit(habit, index) {
   if (habit.dailyTwice === true && !habit.mode) habit.mode = 'twice';
   // 老数据没有 type → 一律当每日打卡，行为完全不变
   habit.type = (habit.type === TYPE_LIST) ? TYPE_LIST : TYPE_DAILY;
+  if (typeof habit.id !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(habit.id)) habit.id = newHabitId();
   if (!habit.mode || !['single', 'twice', 'thrice'].includes(habit.mode)) habit.mode = 'single';
   if (typeof habit.name !== 'string' || !habit.name.trim()) habit.name = '未命名';
   if (typeof habit.startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(habit.startDate)) {
@@ -235,6 +260,7 @@ function normalizeHabit(habit, index) {
   if (!Array.isArray(habit.slotNames) || habit.slotNames.length !== getSlotCount(habit.mode)) {
     habit.slotNames = getDefaultSlotNames(habit.mode);
   }
+  if (habit.type === TYPE_DAILY) normalizeReminderTimes(habit);
   if (habit.order === undefined || typeof habit.order !== 'number') habit.order = index;
   if (!Array.isArray(habit.expandedMonths)) habit.expandedMonths = [];
   if (habit.type === TYPE_LIST) {

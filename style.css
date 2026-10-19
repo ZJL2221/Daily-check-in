@@ -502,3 +502,33 @@ body {
     color: #cbd5e0;
   }
 }
+
+/* ============ 打卡提醒时间 ============ */
+.reminder-list { display: flex; flex-direction: column; gap: 8px; }
+
+.reminder-row { display: flex; align-items: center; gap: 8px; }
+
+.reminder-row .reminder-label {
+  width: 44px; flex-shrink: 0; font-size: 13px; color: #666;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.reminder-row input[type="time"] {
+  flex: 1; min-width: 0; padding: 9px 10px; border: 2px solid #eee;
+  border-radius: 10px; font-size: 14px; font-family: inherit;
+  background: white; color: #333;
+}
+.reminder-row input[type="time"]:focus { outline: none; border-color: #667eea; }
+
+.reminder-clear {
+  width: 30px; height: 30px; flex-shrink: 0; border: none; border-radius: 50%;
+  background: #f5f5f5; color: #999; font-size: 13px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.reminder-clear:active { background: #ececec; }
+
+@media (prefers-color-scheme: dark) {
+  .reminder-row .reminder-label { color: #a0aec0; }
+  .reminder-row input[type="time"] { background: #1a202c; border-color: #4a5568; color: #e2e8f0; }
+  .reminder-clear { background: #3a4556; color: #cbd5e0; }
+}

@@ -89,6 +89,11 @@
         <label>自定义时段名称（可选）</label>
         <div class="slot-names" id="slotNamesInputs"></div>
       </div>
+
+      <div class="form-group" id="reminderGroup">
+        <label>打卡提醒（选填）<span class="label-hint">到点提醒，没打卡每 10 分钟再提醒，最多 3 次</span></label>
+        <div class="reminder-list" id="reminderInputs"></div>
+      </div>
     </div>
 
     <!-- 记录清单专属提示 -->
@@ -212,10 +217,20 @@
   • 减少天数会删掉末尾的记录（备注、锁定一起清）
   • 锁了「全部锁定」🔒 后天数按钮不可用
 
+🔔 打卡提醒（仅每日打卡）
+  • 在「编辑」窗口的自定义时段下面填时间，选填
+  • 到点没打卡：每 10 分钟再提醒一次，最多 3 次
+  • 点掉某条提醒 = 这个时段今天不再提醒，其他时段照旧
+  • 「今天不再提醒」= 当天所有时段都停
+  • 已经打了卡的时段，当天不会提醒
+  • 改时间或删时间，旧的提醒会一起撤掉
+  • 提前排 14 天，打开 App 时自动续排
+
 💡 温馨提示
   • 数据保存在手机本地，卸载应用会丢失
   • 请定期导出备份</div>
     <div class="modal-btns">
+      <button class="btn btn-cancel" onclick="testReminder()">测试提醒（10 秒后）</button>
       <button class="btn btn-confirm" onclick="closeHelpModal()">我知道了</button>
     </div>
   </div>
