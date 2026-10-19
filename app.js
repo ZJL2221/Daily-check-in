@@ -1857,6 +1857,19 @@ async function showReminderStatus() {
     if (lastScheduleInfo.warning) lines.push('⚠️ ' + lastScheduleInfo.warning);
     if (lastScheduleInfo.error) lines.push('❌ 报错：' + lastScheduleInfo.error);
   }
+
+  // 0 条到底是「本来就没设」还是「设了没排上」，必须分开说，否则白折腾
+  const hasAnyTime = getHabits().some(h =>
+    getHabitType(h) === TYPE_DAILY && (h.reminderTimes || []).some(t => isValidTimeStr(t))
+  );
+  if (count === 0 && !hasAnyTime) {
+    lines.push('');
+    lines.push('（现在没有任何项目填过提醒时间，所以 0 条是正常的。');
+    lines.push('到项目的「编辑」窗口里，在时段下面填一个时间试试）');
+  } else if (count === 0 && hasAnyTime) {
+    lines.push('');
+    lines.push('⚠️ 有项目填了提醒时间，却一条都没排上 —— 这是异常。');
+  }
   if (!exactAlarmOk) {
     lines.push('');
     lines.push('精确闹钟没开时，手机会把闹钟攒到「省电维护窗口」才发，');
@@ -2146,7 +2159,19 @@ function setupResumeReschedule() {
   });
 }
 
-/* 测试用：10 秒后弹一条，方便立刻验 */
+/* 问系统要一份「当前真正排进闹钟队的 id 列表」，用来确认排没排上 */
+async function pendingIds() {
+  const LN = getNotifyPlugin();
+  if (!LN) return [];
+  try {
+    const res = await LN.getPending();
+    return ((res && res.notifications) || []).map(n => n.id);
+  } catch (e) {
+    return [];
+  }
+}
+
+/* 测试用：10 秒后弹一条，排上之后会先确认一遍再让你锁屏 */
 async function testReminder() {
   const LN = getNotifyPlugin();
   closeHelpModal();
@@ -2161,15 +2186,24 @@ async function testReminder() {
       notifications: [{
         id: 19999,
         title: '测试提醒（10 秒后）',
-        body: '这条响了说明闹钟通路正常；没听见就拉下通知栏看看有没有',
+        body: '这条响了说明闹钟真的排进系统了',
         channelId: REMIND_CHANNEL,
         schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }
       }]
     });
-    alert('10 秒后会响。\n\n要测「息屏能不能响」，请现在按电源键锁屏、把手机放下。\n如果没听到声音，等会儿把通知栏拉下来看看 —— \n有没有一条时间戳正好是刚才的时间。');
   } catch (e) {
-    alert('测试失败：' + (e && e.message ? e.message : e));
+    alert('排提醒失败：' + (e && e.message ? e.message : e));
+    return;
   }
+
+  // 关键：问系统确认这条真的进去了，再放用户去锁屏。
+  // 否则「刚点完就切后台」会出现「其实没排上，回来才补发」的假象。
+  const ids = await pendingIds();
+  if (ids.indexOf(19999) === -1) {
+    alert('⚠️ 系统里没查到这条闹钟，等于没排上。\n\n先别切后台。\n请再点一次「测试提醒」；如果还是查不到，把这句话告诉我。');
+    return;
+  }
+  alert('已确认排进系统闹钟队列 ✅\n\n现在可以锁屏、切后台，10 秒后会响。\n（如果没响，拉下通知栏看有没有一条时间对得上的）');
 }
 
 /* ---------- 启动 ---------- */
