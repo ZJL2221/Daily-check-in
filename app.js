@@ -1175,7 +1175,7 @@ function closeModal() {
   lockTypeSelector(false);
 }
 
-function saveHabit() {
+async function saveHabit() {
   const name = document.getElementById('habitName').value.trim();
   const type = selectedType || TYPE_DAILY;
   const habits = getHabits();
@@ -1281,15 +1281,7 @@ function saveHabit() {
     renderHabits();
   }
 
-  scheduleRemindersSoon();
-  // 第一次设提醒时顺便申请通知权限，用户同意后立刻重排
-  if (reminderTimes.some(t => t) && !notifyPermission) {
-    ensureNotifyPermission(false).then(ok => { if (ok) scheduleRemindersSoon(); });
-  }
-  // 权限齐了但「精确闹钟」没开，提醒会不准 —— 主动提示一次
-  if (reminderTimes.some(t => t)) {
-    setTimeout(() => { askExactAlarmIfNeeded(); }, 300);
-  }
+  await applyReminders(reminderTimes);
 }
 
 /* ============ 渲染 ============ */
@@ -1657,12 +1649,14 @@ const REMIND_GAP_MIN = 10;       // 没打卡时重复提醒的间隔（分钟�
 const REMIND_MAX_TIMES = 3;      // 每个时段最多提醒几次（含第一次）
 const REMIND_MAX_TOTAL = 300;    // 一次最多排多少条，防止通知过多
 const REMIND_ACTION_TYPE = 'CHECKIN_REMIND';
+const REMIND_CHANNEL = 'checkin-remind';   // 自己的高优先级通道，才会横幅弹出
 const REMIND_ID_BASE = 20000;
 
 let notifyPermission = false;
 let reminderTimer = null;
 let exactAlarmOk = true;        // 「精确闹钟」权限；默认 true，免得没查就骚扰用户
 let exactAlarmWarned = false;   // 每次启动只提示一次
+let lastScheduleInfo = null;    // 最近一次排提醒的结果，诊断页要用
 
 /* 「今天不再提醒」要记住，否则下次回前台续排时又会被排回来 */
 const MUTE_KEY = 'checkin_mutes_v1';   // { habitId: { 'YYYY-MM-DD': 1 } }
@@ -1778,53 +1772,93 @@ async function askExactAlarmIfNeeded(force) {
   }
 }
 
-/* 帮助弹窗里的「提醒设置」：把当前状态一次性说清楚 */
+/* 帮助弹窗里的「提醒设置」：把当前状态一次性说清楚，并且能现场重排 */
+function fmtStamp(ms) {
+  const d = new Date(ms);
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
 async function showReminderStatus() {
   const LN = getNotifyPlugin();
   // 说明弹窗盖着确认框，先收起来
   closeHelpModal();
   if (!LN) { alert('浏览器里没有本地通知，装到手机上才能看'); return; }
-  let display = '未知';
-  let count = 0;
-  try {
-    const p = await LN.checkPermissions();
-    display = (p && p.display === 'granted') ? '已允许' : '被拒绝';
-  } catch (e) { /* 忽略 */ }
+
+  let perm = null;
+  try { perm = await LN.checkPermissions(); } catch (e) { /* 忽略 */ }
   await refreshExactAlarm();
+
+  let count = 0;
+  let nextAt = null;
   try {
     const res = await LN.getPending();
-    count = ((res && res.notifications) || []).filter(n => n.extra && n.extra.checkinHabitId).length;
+    const list = ((res && res.notifications) || []).filter(n => n.extra && n.extra.checkinHabitId);
+    count = list.length;
+    const ats = list
+      .map(n => (n.schedule && n.schedule.at) ? new Date(n.schedule.at).getTime() : 0)
+      .filter(t => t > 0).sort((a, b) => a - b);
+    if (ats.length) nextAt = ats[0];
   } catch (e) { /* 忽略 */ }
 
+  const ua = (navigator.userAgent || '').match(/Android\s+([\d.]+)/);
   const lines = [
-    '通知权限：' + display,
-    '精确闹钟：' + (exactAlarmOk ? '已允许' : '未允许（提醒可能不准时）'),
-    '已排提醒：' + count + ' 条'
+    '系统：' + (ua ? 'Android ' + ua[1] : '非安卓'),
+    '通知权限：' + (perm && perm.display === 'granted' ? '已允许' : '未允许'),
+    '精确闹钟：' + (exactAlarmOk ? '已允许' : '未允许（提醒会被攒着发）'),
+    '已排提醒：' + count + ' 条' + (nextAt ? '，下一条 ' + fmtStamp(nextAt) : '')
   ];
+  if (lastScheduleInfo) {
+    lines.push('上次排：计划 ' + lastScheduleInfo.planned + ' 条 / 成功 ' + lastScheduleInfo.scheduled + ' 条（' + fmtStamp(lastScheduleInfo.at) + '）');
+    if (lastScheduleInfo.warning) lines.push('⚠️ ' + lastScheduleInfo.warning);
+    if (lastScheduleInfo.error) lines.push('❌ 报错：' + lastScheduleInfo.error);
+  }
   if (!exactAlarmOk) {
     lines.push('');
-    lines.push('「精确闹钟」没开时，手机息屏后会攒着不发，');
-    lines.push('这就是「只有开着 App 才响」的原因。');
+    lines.push('精确闹钟没开时，手机会把闹钟攒到「省电维护窗口」才发，');
+    lines.push('表现就是：开着 App 准点响，锁屏或杀掉就不响。');
   }
-  if (display !== '已允许') {
-    lines.push('');
-    lines.push('通知权限被拒的话，请到 系统设置 → 应用 → 打卡工具 → 通知 打开。');
-  }
+
   if (!exactAlarmOk) {
     const yes = await showConfirm(lines.join('\n') + '\n\n现在去打开「精确闹钟」吗？', '提醒设置');
     if (yes) {
       const ok = await openExactAlarmSetting();
-      alert(ok ? '已打开，提醒会准时了' : '还没打开，可以稍后再来');
-      if (ok) scheduleRemindersSoon();
+      alert(ok ? '已打开，提醒会准时了。\n建议再点一次「提醒设置」确认数字。' : '还没打开，可以稍后再来');
+      if (ok) await rescheduleAllReminders();
     }
     return;
   }
-  alert(lines.join('\n'));
+
+  const redo = await showConfirm(lines.join('\n') + '\n\n要清掉重排一次吗？（能刷出最新数字）', '提醒设置');
+  if (!redo) return;
+  await rescheduleAllReminders();
+  if (lastScheduleInfo.error) {
+    alert('重排失败：' + lastScheduleInfo.error);
+  } else {
+    alert('已重排：计划 ' + lastScheduleInfo.planned + ' 条，成功 ' + lastScheduleInfo.scheduled + ' 条。\n再点一次「提醒设置」可以看现在的条数。');
+  }
 }
 
 async function setupReminderChannel() {
   const LN = getNotifyPlugin();
   if (!LN) return;
+  // 插件自带的 Default 通道是「普通」级别，只在通知栏躺着、不弹横幅。
+  // 自己建一个高级别通道，到点会亮屏弹出来，才不会被当成没提醒。
+  try {
+    if (typeof LN.createChannel === 'function') {
+      await LN.createChannel({
+        id: REMIND_CHANNEL,
+        name: '打卡提醒',
+        description: '到点提醒你打卡',
+        importance: 5,          // 5 = 高，允许横幅与提示音
+        visibility: 1,          // 锁屏上显示
+        vibration: true,
+        sound: 'default'
+      });
+    }
+  } catch (e) {
+    console.warn('[提醒] 创建通知通道失败（可能已存在）', e);
+  }
   try {
     await LN.registerActionTypes({
       types: [{
@@ -1913,6 +1947,7 @@ function isDateInHabit(habit, dateStr) {
 async function rescheduleAllReminders() {
   const LN = getNotifyPlugin();
   if (!LN) return;
+  lastScheduleInfo = { at: Date.now(), planned: 0, scheduled: 0, warning: '', error: '', nextAt: null };
   await cancelAllCheckinReminders();
 
   const now = Date.now();
@@ -1946,6 +1981,7 @@ async function rescheduleAllReminders() {
 
   items.sort((a, b) => a.at - b.at);
   const picked = items.slice(0, REMIND_MAX_TOTAL);
+  lastScheduleInfo.planned = picked.length;
   const notifications = picked.map((it, idx) => {
     const multi = getSlotCount(it.habit.mode || 'single') > 1;
     const label = multi ? getSlotLabel(it.habit, it.slot) : '';
@@ -1953,6 +1989,7 @@ async function rescheduleAllReminders() {
       id: REMIND_ID_BASE + idx,
       title: '该打卡了：' + it.habit.name + (label ? ' · ' + label : ''),
       body: it.attempt === 0 ? '点开完成今天的打卡' : '还没打卡，第 ' + (it.attempt + 1) + ' 次提醒',
+      channelId: REMIND_CHANNEL,
       schedule: { at: it.at, allowWhileIdle: true },
       actionTypeId: REMIND_ACTION_TYPE,
       extra: {
@@ -1965,13 +2002,52 @@ async function rescheduleAllReminders() {
   });
 
   for (let i = 0; i < notifications.length; i += 50) {
+    const batch = notifications.slice(i, i + 50);
     try {
-      await LN.schedule({ notifications: notifications.slice(i, i + 50) });
+      const res = await LN.schedule({ notifications: batch });
+      lastScheduleInfo.scheduled += batch.length;
+      if (res && res.warning) {
+        // 插件明确告诉我们「降级成不精确闹钟了」
+        lastScheduleInfo.warning = '系统把闹钟降级成不精确的了（精确闹钟没开）';
+        exactAlarmOk = false;
+      }
     } catch (e) {
+      lastScheduleInfo.error = (e && e.message) ? e.message : String(e);
       console.warn('[提醒] 排提醒失败', e);
       break;
     }
   }
+  lastScheduleInfo.nextAt = picked.length ? picked[0].at.getTime() : null;
+}
+
+/* 保存/修改完项目后走这一条：要权限 → 真排一遍 → 把结果摊开 */
+async function applyReminders(reminderTimes) {
+  const hasTime = Array.isArray(reminderTimes) && reminderTimes.some(t => t);
+  if (!hasTime) { await rescheduleAllReminders(); return; }
+
+  if (!notifyPermission) {
+    const yes = await showConfirm(
+      '到点提醒要在通知栏给你弹消息，需要「通知」权限。\n系统随后会弹一次授权框，点「允许」即可。',
+      '开启打卡提醒'
+    );
+    if (!yes) {
+      alert('没开通知权限，提醒不会响。\n之后可以在 右上角 ! → 提醒设置 里再开。');
+      return;
+    }
+  }
+  const ok = await ensureNotifyPermission(false);
+  if (!ok) {
+    alert('通知权限被拒绝了，提醒不会响。\n请到 系统设置 → 应用 → 打卡工具 → 通知 里允许。');
+    return;
+  }
+  await refreshExactAlarm();
+  await rescheduleAllReminders();
+
+  if (lastScheduleInfo.error) {
+    alert('排提醒失败：' + lastScheduleInfo.error);
+    return;
+  }
+  if (!exactAlarmOk) await askExactAlarmIfNeeded(true);
 }
 
 function scheduleRemindersSoon() {
@@ -2006,27 +2082,29 @@ function setupResumeReschedule() {
   });
 }
 
-/* 测试用：10 秒后弹一条通知，方便立刻验证通没通 */
+/* 测试用：60 秒后弹一条，专门用来验「锁屏/杀后台还能不能响」 */
 async function testReminder() {
   const LN = getNotifyPlugin();
   closeHelpModal();
   if (!LN) { alert('浏览器里没有本地通知，装到手机上才能测'); return; }
   const ok = await ensureNotifyPermission(false);
   if (!ok) { alert('通知权限没开。\n请到 系统设置 → 应用 → 打卡工具 → 通知，允许通知后重试。'); return; }
-  // 10 秒的测试在前台一定到，先确认精确闹钟，免得「测得到、真到时收不到」
-  await askExactAlarmIfNeeded(true);
+  await refreshExactAlarm();
+  if (!exactAlarmOk) await askExactAlarmIfNeeded(true);
+
   try {
     await LN.schedule({
       notifications: [{
         id: 19999,
-        title: '测试提醒',
-        body: '能看到这条，说明通知通路没问题',
-        schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }
+        title: '测试提醒（60 秒后）',
+        body: '息屏状态下收到这条 = 提醒通路真的通了',
+        channelId: REMIND_CHANNEL,
+        schedule: { at: new Date(Date.now() + 60000), allowWhileIdle: true }
       }]
     });
-    alert('10 秒后会弹一条通知。\n注意：这条是在 App 前台发的，能收到只说明通路通，不代表息屏也准时 —— 那个看「精确闹钟」。');
+    alert('已排一条 60 秒后的提醒。\n\n现在请这样做：\n① 锁屏\n② 手机放下别碰\n③ 等 1 分钟\n\n盯着 App 看不算数 —— 前台一定响，测不出问题。');
   } catch (e) {
-    alert('测试失败：' + e.message);
+    alert('测试失败：' + (e && e.message ? e.message : e));
   }
 }
 
