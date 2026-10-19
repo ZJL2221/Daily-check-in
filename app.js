@@ -1089,6 +1089,10 @@ function saveHabit() {
   if (reminderTimes.some(t => t) && !notifyPermission) {
     ensureNotifyPermission(false).then(ok => { if (ok) scheduleRemindersSoon(); });
   }
+  // 权限齐了但「精确闹钟」没开，提醒会不准 —— 主动提示一次
+  if (reminderTimes.some(t => t)) {
+    setTimeout(() => { askExactAlarmIfNeeded(); }, 300);
+  }
 }
 
 /* ============ 渲染 ============ */
@@ -1459,6 +1463,8 @@ const REMIND_ID_BASE = 20000;
 
 let notifyPermission = false;
 let reminderTimer = null;
+let exactAlarmOk = true;        // 「精确闹钟」权限；默认 true，免得没查就骚扰用户
+let exactAlarmWarned = false;   // 每次启动只提示一次
 
 /* 「今天不再提醒」要记住，否则下次回前台续排时又会被排回来 */
 const MUTE_KEY = 'checkin_mutes_v1';   // { habitId: { 'YYYY-MM-DD': 1 } }
@@ -1527,6 +1533,95 @@ async function ensureNotifyPermission(silent) {
     console.warn('[提醒] 权限检查失败', e);
     return false;
   }
+}
+
+/* 「精确闹钟」权限：Android 13+ 默认拒绝，没开时闹钟会被降级成不精确闹钟，
+   息屏进 Doze 后系统攒着不发，表现就是「只有开着 App 才提醒」 */
+async function refreshExactAlarm() {
+  const LN = getNotifyPlugin();
+  if (!LN || typeof LN.checkExactNotificationSetting !== 'function') { exactAlarmOk = true; return true; }
+  try {
+    const st = await LN.checkExactNotificationSetting();
+    if (!st || st.exact_alarm === undefined) { exactAlarmOk = true; return true; }
+    exactAlarmOk = st.exact_alarm === 'granted';
+    return exactAlarmOk;
+  } catch (e) {
+    exactAlarmOk = true;   // 查不了就当没问题，别乱弹提示
+    return true;
+  }
+}
+
+/* 跳到系统「闹钟和提醒」设置页，用户回来后重新读状态 */
+async function openExactAlarmSetting() {
+  const LN = getNotifyPlugin();
+  if (!LN || typeof LN.changeExactNotificationSetting !== 'function') return false;
+  try {
+    await LN.changeExactNotificationSetting();
+  } catch (e) {
+    console.warn('[提醒] 打开精确闹钟设置失败', e);
+  }
+  return await refreshExactAlarm();
+}
+
+/* 需要精确闹钟却还没开时，问一次要不要去开 */
+async function askExactAlarmIfNeeded(force) {
+  if (!getNotifyPlugin() || !notifyPermission) return;
+  if (exactAlarmWarned && !force) return;
+  if (await refreshExactAlarm()) return;
+  exactAlarmWarned = true;
+  const yes = await showConfirm(
+    '系统没给「精确闹钟」权限，息屏后提醒会被手机攒着发，可能晚几十分钟甚至不发。\n\n去设置里打开吗？',
+    '提醒可能不准'
+  );
+  if (yes) {
+    const ok = await openExactAlarmSetting();
+    alert(ok ? '已打开，提醒会准时了' : '还没打开。之后可以在 右上角 ! → 提醒设置 里再试');
+    if (ok) scheduleRemindersSoon();
+  }
+}
+
+/* 帮助弹窗里的「提醒设置」：把当前状态一次性说清楚 */
+async function showReminderStatus() {
+  const LN = getNotifyPlugin();
+  // 说明弹窗盖着确认框，先收起来
+  closeHelpModal();
+  if (!LN) { alert('浏览器里没有本地通知，装到手机上才能看'); return; }
+  let display = '未知';
+  let count = 0;
+  try {
+    const p = await LN.checkPermissions();
+    display = (p && p.display === 'granted') ? '已允许' : '被拒绝';
+  } catch (e) { /* 忽略 */ }
+  await refreshExactAlarm();
+  try {
+    const res = await LN.getPending();
+    count = ((res && res.notifications) || []).filter(n => n.extra && n.extra.checkinHabitId).length;
+  } catch (e) { /* 忽略 */ }
+
+  const lines = [
+    '通知权限：' + display,
+    '精确闹钟：' + (exactAlarmOk ? '已允许' : '未允许（提醒可能不准时）'),
+    '已排提醒：' + count + ' 条'
+  ];
+  if (!exactAlarmOk) {
+    lines.push('');
+    lines.push('「精确闹钟」没开时，手机息屏后会攒着不发，');
+    lines.push('这就是「只有开着 App 才响」的原因。');
+  }
+  if (display !== '已允许') {
+    lines.push('');
+    lines.push('通知权限被拒的话，请到 系统设置 → 应用 → 打卡工具 → 通知 打开。');
+  }
+  if (!exactAlarmOk) {
+    const yes = await showConfirm(lines.join('\n') + '\n\n现在去打开「精确闹钟」吗？', '提醒设置');
+    if (yes) {
+      const ok = await openExactAlarmSetting();
+      alert(ok ? '已打开，提醒会准时了' : '还没打开，可以稍后再来');
+      if (ok) scheduleRemindersSoon();
+    }
+    return;
+  }
+  alert(lines.join('\n'));
 }
 
 async function setupReminderChannel() {
@@ -1697,7 +1792,12 @@ async function initReminders() {
   await loadMutes();
   if (pruneMutes(formatDate(new Date()))) await saveMutes();
   notifyPermission = await ensureNotifyPermission(true);
-  if (notifyPermission) await rescheduleAllReminders();
+  if (notifyPermission) {
+    await refreshExactAlarm();
+    await rescheduleAllReminders();
+    // 排上了但精确闹钟没开：开局提示一次，否则用户只会觉得「提醒时灵时不灵」
+    if (!exactAlarmOk) setTimeout(() => { askExactAlarmIfNeeded(); }, 1500);
+  }
 }
 
 function setupResumeReschedule() {
@@ -1711,19 +1811,22 @@ function setupResumeReschedule() {
 /* 测试用：10 秒后弹一条通知，方便立刻验证通没通 */
 async function testReminder() {
   const LN = getNotifyPlugin();
+  closeHelpModal();
   if (!LN) { alert('浏览器里没有本地通知，装到手机上才能测'); return; }
   const ok = await ensureNotifyPermission(false);
   if (!ok) { alert('通知权限没开。\n请到 系统设置 → 应用 → 打卡工具 → 通知，允许通知后重试。'); return; }
+  // 10 秒的测试在前台一定到，先确认精确闹钟，免得「测得到、真到时收不到」
+  await askExactAlarmIfNeeded(true);
   try {
     await LN.schedule({
       notifications: [{
         id: 19999,
         title: '测试提醒',
-        body: '能看到这条，说明打卡提醒已经通了',
+        body: '能看到这条，说明通知通路没问题',
         schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }
       }]
     });
-    alert('10 秒后会弹一条通知，可以先退到后台等它');
+    alert('10 秒后会弹一条通知。\n注意：这条是在 App 前台发的，能收到只说明通路通，不代表息屏也准时 —— 那个看「精确闹钟」。');
   } catch (e) {
     alert('测试失败：' + e.message);
   }

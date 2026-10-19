@@ -226,11 +226,19 @@
   • 改时间或删时间，旧的提醒会一起撤掉
   • 提前排 14 天，打开 App 时自动续排
 
+⚠️ 提醒不准时怎么办
+  • 先点下面的「提醒设置」看状态
+  • 「精确闹钟」没允许 → 手机会把提醒攒着发，息屏后可能很晚才响
+  • 国产系统（小米/华为/OPPO/vivo）还要在
+    设置 → 应用 → 打卡工具 里打开「自启动」「后台无限制」
+  • 电池省电模式也可能压掉提醒，建议给本应用关掉
+
 💡 温馨提示
   • 数据保存在手机本地，卸载应用会丢失
   • 请定期导出备份</div>
-    <div class="modal-btns">
-      <button class="btn btn-cancel" onclick="testReminder()">测试提醒（10 秒后）</button>
+    <div class="modal-btns modal-btns-3">
+      <button class="btn btn-cancel" onclick="showReminderStatus()">提醒设置</button>
+      <button class="btn btn-cancel" onclick="testReminder()">测试提醒</button>
       <button class="btn btn-confirm" onclick="closeHelpModal()">我知道了</button>
     </div>
   </div>
