@@ -7,7 +7,7 @@
 安卓手机可直接安装（两个地址内容相同，选能打开的即可）：
 
 - GitHub：[下载最新版 APK](https://github.com/ZJL2221/Daily-check-in/releases/latest)
-- Gitee：[下载 v1.1 APK](https://gitee.com/JLZZZ/Daily-check-in/releases/download/v1.1/app-release.apk)
+- Gitee：[下载 v1.2 APK](https://gitee.com/JLZZZ/Daily-check-in/releases/download/v1.2/app-release.apk)
 
 首次安装需在系统设置中允许「安装未知来源的应用」。
 
