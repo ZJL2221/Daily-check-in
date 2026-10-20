@@ -235,6 +235,8 @@ function toggleMasterLock(i, e) {
   h[i].masterLocked = !h[i].masterLocked;
   saveHabits(h);
   renderHabits();
+  // 锁定全部 = 不打扰，解锁后要把提醒排回来
+  scheduleRemindersSoon();
 }
 
 function toggleDeleteLock(i) {
@@ -382,6 +384,8 @@ async function checkAll(i, check) {
   }
   saveHabits(h);
   renderHabits();
+  // 全部打卡后当天剩余提醒要撤掉；全部取消后要重新排回来
+  scheduleRemindersSoon();
 }
 
 async function deleteHabit(i, habitRef) {
@@ -419,6 +423,8 @@ function addDays(i, days) {
   }
   saveHabits(h);
   renderHabits();
+  // 新增的日期也要有提醒
+  scheduleRemindersSoon();
 }
 
 async function reduceDays(i, days) {
@@ -454,6 +460,8 @@ async function reduceDays(i, days) {
   h[i].totalDays = newTotal;
   saveHabits(h);
   renderHabits();
+  // 被删掉的日期不能再留提醒
+  scheduleRemindersSoon();
 }
 
 function moveHabit(i, delta, e) {
@@ -484,6 +492,8 @@ function showUndoBar(habit, index) {
     bar.remove();
     undoBarEl = null;
     clearTimeout(undoTimer);
+    // 删的时候提醒被撤了，撤销后要排回来
+    scheduleRemindersSoon();
   };
   document.body.appendChild(bar);
   undoBarEl = bar;
@@ -497,6 +507,8 @@ let noteDateStr = '';
 function openNoteModal(i, dateStr) {
   const h = getHabits();
   if (!h[i]) return;
+  if (h[i].masterLocked) return;
+  if (h[i].lockedDates && h[i].lockedDates.includes(dateStr)) return;
   noteHabitIndex = i;
   noteDateStr = dateStr;
   const d = parseDateStr(dateStr);
@@ -506,7 +518,7 @@ function openNoteModal(i, dateStr) {
   document.getElementById('noteInput').value = note;
   updateNoteCharCount();
   document.getElementById('noteModal').classList.add('active');
-  setTimeout(() => document.getElementById('noteInput').focus(), 300);
+  // 不再自动聚焦，避免一点开就弹输入法
 }
 
 function updateNoteCharCount() {
@@ -682,6 +694,7 @@ function startItemEdit(i, itemId, e) {
    手机上这样键盘不会挤压卡片布局，也不用先滚到列表底部去点输入框。 */
 let itemModalHabitIndex = -1;
 let itemModalSavedCount = 0;
+let itemHintTimer = null;
 
 function openItemModal(i) {
   const h = getHabits();
@@ -692,7 +705,7 @@ function openItemModal(i) {
   document.getElementById('itemModalLabel').textContent = '添加到「' + h[i].name + '」';
   document.getElementById('itemInput').value = '';
   document.getElementById('itemCharCount').textContent = '0';
-  document.getElementById('itemModalHint').textContent = '保存后可以接着加下一条';
+  document.getElementById('itemModalHint').textContent = '确定后可以接着加下一条';
   document.getElementById('itemModal').classList.add('active');
   setTimeout(() => document.getElementById('itemInput').focus(), 320);
 }
@@ -701,6 +714,7 @@ function closeItemModal() {
   document.getElementById('itemModal').classList.remove('active');
   itemModalHabitIndex = -1;
   itemModalSavedCount = 0;
+  clearTimeout(itemHintTimer);
 }
 
 function saveItemModal() {
@@ -717,8 +731,12 @@ function saveItemModal() {
   inp.value = '';
   document.getElementById('itemCharCount').textContent = '0';
   itemModalSavedCount++;
-  document.getElementById('itemModalHint').textContent =
-    '已添加 ' + itemModalSavedCount + ' 条，可继续输入';
+  const hint = document.getElementById('itemModalHint');
+  hint.textContent = '已添加';
+  clearTimeout(itemHintTimer);
+  itemHintTimer = setTimeout(() => {
+    hint.textContent = '已添加 ' + itemModalSavedCount + ' 条，可继续输入';
+  }, 1200);
   inp.focus();
 }
 
@@ -807,6 +825,7 @@ function importData(event) {
         dateListCache.clear();
         renderHabits();
         alert('导入成功，共 ' + normalized.length + ' 个项目。');
+        scheduleRemindersSoon();
         return;
       }
 
@@ -829,6 +848,7 @@ function importData(event) {
         renderHabits();
         alert('✅ 合并导入成功\n\n共 ' + merged.length + ' 个项目（原有 ' +
               (merged.length - fresh.length) + ' + 新增 ' + fresh.length + '）');
+        scheduleRemindersSoon();
       } else if (choice === 'replace') {
         // 替换会清空现有数据且不可撤销，第二道确认保留
         const ok = await showConfirm(
@@ -841,6 +861,7 @@ function importData(event) {
         dateListCache.clear();
         renderHabits();
         alert('已替换，共 ' + normalized.length + ' 个项目。');
+        scheduleRemindersSoon();
       }
       // choice === null：用户点了「取消」，什么都不做
     } catch (err) {
@@ -902,6 +923,32 @@ function renderSlotNameInputs(presetNames) {
     html += '<input type="text" id="slotName' + i + '" placeholder="' + getDefaultSlotNames(selectedMode)[i] + '" value="' + escapeHtml(val) + '" maxlength="6">';
   }
   wrap.innerHTML = html;
+  // 改时段名时，下面提醒行的标签跟着改
+  for (let i = 0; i < n; i++) {
+    const input = document.getElementById('slotName' + i);
+    if (input && input.addEventListener) input.addEventListener('input', syncReminderLabels);
+  }
+}
+
+/* 取当前输入框里的时段名，空的话退回默认名 */
+function currentSlotNames() {
+  const n = getSlotCount(selectedMode);
+  const defaults = getDefaultSlotNames(selectedMode);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const el = document.getElementById('slotName' + i);
+    const v = el && el.value ? el.value.trim() : '';
+    out.push(v || defaults[i] || ('时段' + (i + 1)));
+  }
+  return out;
+}
+
+function syncReminderLabels() {
+  const names = currentSlotNames();
+  names.forEach((name, i) => {
+    const el = document.getElementById('reminderLabel' + i);
+    if (el) el.textContent = name;
+  });
 }
 
 /* ---------- 打卡提醒时间输入：每个时段一个，可留空 ---------- */
@@ -919,13 +966,15 @@ function renderReminderInputs(presetTimes) {
   const wrap = document.getElementById('reminderInputs');
   if (!wrap) return;
   const n = getSlotCount(selectedMode);
-  const names = selectedMode === 'single' ? ['打卡提醒'] : getDefaultSlotNames(selectedMode);
+  // 单次模式写「设置时间」（原来「打卡提醒」四个字会被挤掉）；多次模式跟随时段名
+  const names = selectedMode === 'single' ? [] : currentSlotNames();
   let html = '';
   for (let i = 0; i < n; i++) {
     const val = (presetTimes && presetTimes[i]) || '';
+    const label = selectedMode === 'single' ? '设置时间' : (names[i] || ('时段' + (i + 1)));
     html += '<div class="reminder-row">' +
-      '<span class="reminder-label">' + escapeHtml(names[i] || ('时段' + (i + 1))) + '</span>' +
-      '<input type="text" class="reminder-time" readonly placeholder="未设置" id="reminderTime' + i + '" value="' + escapeHtml(val) + '" onclick="openTimePicker(' + i + ')">' +
+      '<span class="reminder-label" id="reminderLabel' + i + '">' + escapeHtml(label) + '</span>' +
+      '<input type="text" class="reminder-time" readonly placeholder="选填：未设置" id="reminderTime' + i + '" value="' + escapeHtml(val) + '" onclick="openTimePicker(' + i + ')">' +
       '<button type="button" class="reminder-clear" onclick="clearReminderTime(' + i + ')" aria-label="不提醒">✕</button>' +
       '</div>';
   }
@@ -1199,10 +1248,7 @@ async function saveHabit() {
     saveHabits(habits);
     closeModal();
     renderHabits();
-    // 新建的清单直接把「添加一条」弹窗打开，省一次点击
-    if (editingIndex < 0) {
-      setTimeout(() => openItemModal(habits.length - 1), 300);
-    }
+    // 新建的清单不再自动弹「添加一条」，避免打断用户
     return;
   }
 
@@ -1418,7 +1464,7 @@ function renderDailyCard(habit, habitIndex, total) {
   const perDayLabel = mode === 'single' ? '每日1次' : mode === 'twice' ? '每日2次' : '每日3次';
 
   return `
-    <div class="card ${isArchived ? 'archived' : ''}">
+    <div class="card ${isArchived ? 'archived' : ''}" data-habit-id="${escapeHtml(habit.id || '')}" data-habit-index="${habitIndex}">
       <div class="habit-header" onclick="toggleExpand(${habitIndex})">
         <div class="habit-info">
           <div class="habit-title-row">
@@ -1437,7 +1483,7 @@ function renderDailyCard(habit, habitIndex, total) {
       </div>
 
       <div class="date-list ${isExpanded ? 'expanded' : ''}">
-        <div class="long-press-hint">💡 长按日期可锁定/解锁 · 点击 🗨️ 添加备注</div>
+        <div class="long-press-hint">💡 长按整行可锁定/解锁 · 点击 🗨️ 添加备注</div>
         ${renderDateSection(habit, habitIndex, dates, mode, lockedDates, isMasterLocked)}
         <div class="habit-footer">
           <button class="btn-small btn-check-all" onclick="checkAll(${habitIndex}, true)" ${isMasterLocked ? 'disabled' : ''}>全部打卡</button>
@@ -1488,7 +1534,9 @@ function renderDateItem(habit, habitIndex, d, mode, lockedDates, isMasterLocked)
   const hasNote = habit.notes && habit.notes[d.dateStr];
   const noteIcon = hasNote ? '📝' : '🗨️';
 
-  const noteBtn = `<button class="note-btn ${hasNote ? 'has-note' : ''}"
+  const noteBtn = isLocked
+    ? `<span class="note-btn locked-note" title="已锁定">${noteIcon}</span>`
+    : `<button class="note-btn ${hasNote ? 'has-note' : ''}"
       ontouchstart="event.stopPropagation()"
       ontouchend="event.stopPropagation()"
       onmousedown="event.stopPropagation()"
@@ -1531,7 +1579,7 @@ function renderDateItem(habit, habitIndex, d, mode, lockedDates, isMasterLocked)
     const checked = status[i] || false;
     const label = getSlotShort(mode, i);
     const sub = getSlotLabel(habit, i);
-    return `<button class="slot-btn ${checked ? 'checked' : ''} ${isLocked ? 'locked' : ''}"
+    return `<button class="slot-btn ${checked ? 'checked' : ''} ${isLocked ? 'locked' : ''}" data-slot="${i}"
         ontouchstart="btnPressStart(${habitIndex}, '${d.dateStr}', ${i}, event)"
         ontouchmove="btnPressMove(event)"
         ontouchend="btnPressEnd(${habitIndex}, '${d.dateStr}', ${i}, event)"
@@ -1566,8 +1614,9 @@ function isUntouchedDefault(h) {
     (h.items || []).length === 0;
 }
 
-/* ---------- 使用说明弹窗 ---------- */
+/* ---------- 使用说明弹窗：两张卡片（使用说明 / 功能） ---------- */
 function openHelpModal() {
+  switchHelpTab('guide');
   document.getElementById('helpModal').classList.add('active');
 }
 
@@ -1575,8 +1624,170 @@ function closeHelpModal() {
   document.getElementById('helpModal').classList.remove('active');
 }
 
+function switchHelpTab(which) {
+  const guide = which !== 'tools';
+  document.getElementById('helpPaneGuide').style.display = guide ? '' : 'none';
+  document.getElementById('helpPaneTools').style.display = guide ? 'none' : '';
+  document.getElementById('helpTabGuide').classList.toggle('active', guide);
+  document.getElementById('helpTabTools').classList.toggle('active', !guide);
+}
+
+/* 字号缩放：Android WebView 支持 -webkit-text-size-adjust，只放大文字、不动布局 */
+const UI_SCALES = [70, 80, 90, 100, 110, 120, 130];
+const UI_SCALE_KEY = 'checkin_ui_scale_v1';
+let uiScaleIndex = UI_SCALES.indexOf(100);   // 默认 100%
+
+function applyUiScale() {
+  const pct = UI_SCALES[uiScaleIndex];
+  const v = pct + '%';
+  [document.documentElement, document.body].forEach(el => {
+    if (!el || !el.style) return;
+    el.style.webkitTextSizeAdjust = v;
+    el.style.textSizeAdjust = v;
+  });
+  const label = document.getElementById('fontScaleVal');
+  if (label) label.textContent = pct === 100 ? '默认' : pct + '%';
+}
+
+function loadUiScale() {
+  try {
+    const saved = parseInt(localStorage.getItem(UI_SCALE_KEY), 10);
+    const idx = UI_SCALES.indexOf(saved);
+    if (idx > -1) uiScaleIndex = idx;
+  } catch (e) { /* 读不到就用默认 */ }
+  applyUiScale();
+}
+
+function changeUiScale(delta) {
+  uiScaleIndex = Math.max(0, Math.min(UI_SCALES.length - 1, uiScaleIndex + delta));
+  try { localStorage.setItem(UI_SCALE_KEY, String(UI_SCALES[uiScaleIndex])); } catch (e) { /* 忽略 */ }
+  applyUiScale();
+}
+
+/* 开屏动画开关：判断放在这里，读标记的早脚本在 index.html 的 head 里（防闪绿） */
+const SPLASH_KEY = 'checkin_splash_off_v1';
+
+function isSplashOff() {
+  try { return localStorage.getItem(SPLASH_KEY) === '1'; } catch (e) { return false; }
+}
+
+function applySplashSetting() {
+  const off = isSplashOff();
+  if (document.documentElement && document.documentElement.classList) {
+    document.documentElement.classList.toggle('no-splash', off);
+  }
+  if (off) {
+    const el = document.getElementById('splash');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  const toggle = document.getElementById('splashToggle');
+  if (toggle && toggle.classList) {
+    toggle.classList.toggle('on', !off);
+    if (toggle.setAttribute) toggle.setAttribute('aria-checked', off ? 'false' : 'true');
+  }
+}
+
+function toggleSplash() {
+  try { localStorage.setItem(SPLASH_KEY, isSplashOff() ? '0' : '1'); } catch (e) { /* 忽略 */ }
+  applySplashSetting();
+  showToast(isSplashOff() ? '已关闭开屏动画' : '已开启开屏动画', 2000);
+}
+
+/* 主题：CSS 变量驱动，data-theme 挂在 <html> 上；head 早脚本先读一次防闪色 */
+const THEME_KEY = 'checkin_theme_v1';
+const THEMES = ['default', 'green', 'ocean', 'sunset', 'sakura', 'teal',
+  'peach', 'taro', 'matcha', 'mist', 'dusk', 'aurora'];
+const THEME_LABELS = {
+  default: '经典紫', green: '森林绿', ocean: '海盐蓝', sunset: '落日橙',
+  sakura: '樱花粉', teal: '薄荷青', peach: '蜜桃乌龙', taro: '香芋拿铁',
+  matcha: '抹茶奶绿', mist: '雾灰蓝', dusk: '晚霞', aurora: '极光'
+};
+
+function getTheme() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return THEMES.indexOf(v) > -1 ? v : 'default';
+  } catch (e) { return 'default'; }
+}
+
+function applyTheme() {
+  const name = getTheme();
+  const root = document.documentElement;
+  if (root && root.setAttribute) {
+    if (name === 'default') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', name);
+  }
+  THEMES.forEach(t => {
+    const el = document.getElementById('themeItem_' + t);
+    if (!el || !el.classList) return;
+    el.classList.toggle('active', t === name);
+    if (el.setAttribute) el.setAttribute('aria-pressed', t === name ? 'true' : 'false');
+  });
+}
+
+function setTheme(name) {
+  if (THEMES.indexOf(name) === -1) return;
+  try { localStorage.setItem(THEME_KEY, name); } catch (e) { /* 忽略 */ }
+  applyTheme();
+  showToast('已切换到「' + THEME_LABELS[name] + '」主题', 2000);
+}
+
+/* ---------- 使用说明底部「问题总览」 ----------
+   一次性弹的提示容易被划走，改成常驻入口。以后有新问题往这里加一条即可 */
+const TROUBLE_GUIDE = {
+  'no-notify': {
+    title: '到设置的提醒时间后未收到通知？',
+    html: '<p>请按顺序检查：</p>'
+      + '<p><b>① 检查通知权限</b><br>关掉本窗口，点下面的「提醒设置」，看「通知权限」是不是 ✅。'
+      + '不是的话，点那一行的「去开启」。</p>'
+      + '<p><b>② 检查自启动</b><br>设置 → 应用 → 打卡工具 → 打开「自启动」。<br>'
+      + '退出 App 后系统无法发送通知。</p>'
+      + '<p><b>③ 挂在后台收不到通知（可选，不推荐）</b><br>'
+      + '在该应用的省电策略为默认情况下，如果 App 挂在后台，会无法收到弹窗通知，'
+      + '只有返回前台时才会收到弹窗通知。<br>'
+      + '如果你想让该 App 在后台常驻的情况下依然能收到通知，请将「省电策略」改成「无限制」。</p>'
+  }
+};
+
+function showTrouble(id) {
+  const item = TROUBLE_GUIDE[id];
+  if (!item) return;
+  document.getElementById('troubleTitle').textContent = item.title;
+  document.getElementById('troubleBody').innerHTML = item.html;
+  document.getElementById('troubleModal').classList.add('active');
+}
+
+function closeTroubleModal() {
+  document.getElementById('troubleModal').classList.remove('active');
+}
+document.getElementById('troubleModal').addEventListener('click', function (e) {
+  if (e.target === this) closeTroubleModal();
+});
+
+/* ---------- 通用提示弹窗（比原生 alert 醒目、可读） ---------- */
+function showNotice(title, html) {
+  document.getElementById('noticeTitle').textContent = title;
+  document.getElementById('noticeBody').innerHTML = html;
+  document.getElementById('noticeModal').classList.add('active');
+}
+
+function closeNoticeModal() {
+  document.getElementById('noticeModal').classList.remove('active');
+}
+document.getElementById('noticeModal').addEventListener('click', function (e) {
+  if (e.target === this) closeNoticeModal();
+});
+
 /* ---------- 事件绑定 ---------- */
 document.getElementById('noteInput').addEventListener('input', updateNoteCharCount);
+
+/* 卡片内长按已有自己的交互，别让系统再弹「复制 / 全选」菜单 */
+document.addEventListener('contextmenu', function (e) {
+  const t = e.target;
+  if (t && t.closest && t.closest('.card') && !t.closest('input, textarea')) {
+    e.preventDefault();
+  }
+});
 
 /* 添加清单条目的弹窗 */
 document.getElementById('itemInput').addEventListener('input', function () {
@@ -1624,7 +1835,8 @@ document.getElementById('importModal').addEventListener('click', function (e) {
 
 /* ---------- 返回键：有弹窗先关弹窗，没弹窗才退出 App ---------- */
 function closeTopModal() {
-  if (document.getElementById('syncModal').classList.contains('active')) return true;  // 同步中不许返回关掉
+  if (document.getElementById('syncModal').classList.contains('active')) { closeSyncModal(); return true; }
+  if (document.getElementById('reminderStatusModal').classList.contains('active')) { closeReminderStatus(); return true; }
   if (document.getElementById('timePickerModal').classList.contains('active')) { closeTimePicker(); return true; }
   if (document.getElementById('confirmModal').classList.contains('active')) { closeConfirm(false); return true; }
   if (document.getElementById('importModal').classList.contains('active')) { closeImportChoice(null); return true; }
@@ -1632,6 +1844,8 @@ function closeTopModal() {
   if (document.getElementById('noteModal').classList.contains('active')) { closeNoteModal(); return true; }
   if (document.getElementById('modal').classList.contains('active')) { closeModal(); return true; }
   if (document.getElementById('exportModal').classList.contains('active')) { closeExportModal(); return true; }
+  if (document.getElementById('noticeModal').classList.contains('active')) { closeNoticeModal(); return true; }
+  if (document.getElementById('troubleModal').classList.contains('active')) { closeTroubleModal(); return true; }
   if (document.getElementById('helpModal').classList.contains('active')) { closeHelpModal(); return true; }
   return false;
 }
@@ -1778,7 +1992,7 @@ async function askExactAlarmIfNeeded(force) {
 function fmtStamp(ms) {
   const d = new Date(ms);
   const p = n => String(n).padStart(2, '0');
-  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
 
 /* 读「打卡提醒」这个通知通道的真实设置：重要性低或没声音，就会「响了你也听不见」 */
@@ -1793,13 +2007,6 @@ async function getChannelInfo() {
     console.warn('[提醒] 读取通知通道失败', e);
     return null;
   }
-}
-
-function channelDesc(ch) {
-  if (!ch) return '不存在（会退回系统默认通道）';
-  const imp = { 0: '关闭', 1: '最低', 2: '低', 3: '普通(不弹横幅)', 4: '高', 5: '最高' }[ch.importance];
-  const snd = ch.sound ? '有' : '无';
-  return '重要性' + (imp || ch.importance) + ' / 声音' + snd + ' / 震动' + (ch.vibration ? '开' : '关');
 }
 
 async function rebuildChannel() {
@@ -1822,6 +2029,8 @@ async function rebuildChannel() {
   }
 }
 
+/* 帮助弹窗里的「提醒设置」：面板式，四个环节各自一行，
+   哪个环节有问题一眼看出，当场就能修，不再让用户读一大段技术字 */
 async function showReminderStatus() {
   const LN = getNotifyPlugin();
   // 说明弹窗盖着确认框，先收起来
@@ -1830,7 +2039,10 @@ async function showReminderStatus() {
 
   let perm = null;
   try { perm = await LN.checkPermissions(); } catch (e) { /* 忽略 */ }
+  const permOk = !!(perm && perm.display === 'granted');
   await refreshExactAlarm();
+  const ch = await getChannelInfo();
+  const soundOk = !!ch && ch.importance >= 4 && !!ch.sound;
 
   let count = 0;
   let nextAt = null;
@@ -1844,78 +2056,142 @@ async function showReminderStatus() {
     if (ats.length) nextAt = ats[0];
   } catch (e) { /* 忽略 */ }
 
-  const ua = (navigator.userAgent || '').match(/Android\s+([\d.]+)/);
-  const ch = await getChannelInfo();
-  const lines = [
-    '系统：' + (ua ? 'Android ' + ua[1] : '非安卓'),
-    '通知权限：' + (perm && perm.display === 'granted' ? '已允许' : '未允许'),
-    '精确闹钟：' + (exactAlarmOk ? '已允许' : '未允许（提醒会被攒着发）'),
-    '通知通道：' + channelDesc(ch),
-    '系统回查：' + count + ' 条' + (nextAt ? '，下一条 ' + fmtStamp(nextAt) : '')
-  ];
-  if (lastScheduleInfo) {
-    lines.push('本次排入：' + lastScheduleInfo.scheduled + ' / ' + lastScheduleInfo.planned
-      + ' 条（' + fmtStamp(lastScheduleInfo.at) + '）');
-    if (lastScheduleInfo.warning) lines.push('⚠️ ' + lastScheduleInfo.warning);
-    if (lastScheduleInfo.error) lines.push('❌ 报错：' + lastScheduleInfo.error);
-  }
-
   // 0 条到底是「本来就没设」还是「设了没排上」，必须分开说，否则白折腾
   const hasAnyTime = getHabits().some(h =>
     getHabitType(h) === TYPE_DAILY && (h.reminderTimes || []).some(t => isValidTimeStr(t))
   );
   const lastOk = lastScheduleInfo ? lastScheduleInfo.scheduled : 0;
-  if (count === 0 && !hasAnyTime) {
-    lines.push('');
-    lines.push('（现在没有任何项目填过提醒时间，所以 0 条是正常的。');
-    lines.push('到项目的「编辑」窗口里，在时段下面填一个时间试试）');
-  } else if (count === 0 && hasAnyTime && lastOk > 0) {
-    lines.push('');
-    lines.push('本机记录排进了 ' + lastOk + ' 条，但系统回查是 0 —— 多半还没落盘。');
-    lines.push('过几秒再点一次「提醒设置」看看，数字出来了就正常。');
-  } else if (count === 0 && hasAnyTime) {
-    lines.push('');
-    lines.push('⚠️ 有项目填了提醒时间，却一条都没排上 —— 这是异常。');
-  }
-  if (!exactAlarmOk) {
-    lines.push('');
-    lines.push('精确闹钟没开时，手机会把闹钟攒到「省电维护窗口」才发，');
-    lines.push('表现就是：开着 App 准点响，锁屏或杀掉就不响。');
-  }
 
-  if (!exactAlarmOk) {
-    const yes = await showConfirm(lines.join('\n') + '\n\n现在去打开「精确闹钟」吗？', '提醒设置');
-    if (yes) {
-      const ok = await openExactAlarmSetting();
-      alert(ok ? '已打开，提醒会准时了。\n建议再点一次「提醒设置」确认数字。' : '还没打开，可以稍后再来');
-      if (ok) await rescheduleAllReminders();
-    }
-    return;
-  }
-
-  // 通道被系统或用户改成了「不弹横幅 / 没声音」：提醒其实来了，只是你没察觉
-  const chBad = !ch || ch.importance <= 3 || !ch.sound;
-  if (chBad) {
-    const yes = await showConfirm(
-      lines.join('\n') + '\n\n这个通知通道现在是「不弹横幅 / 没声音」状态，\n提醒可能真的发了，只是你听不到也看不见。\n\n要重建这个通道吗？（会恢复成高优先级 + 响铃）',
-      '提醒设置'
-    );
-    if (yes) {
-      await rebuildChannel();
-      await rescheduleAllReminders();
-      alert('通道已重建。\n再点一次「提醒设置」确认：重要性应为「高」、声音「有」。');
-    }
-    return;
-  }
-
-  const redo = await showConfirm(lines.join('\n') + '\n\n要清掉重排一次吗？（能刷出最新数字）', '提醒设置');
-  if (!redo) return;
-  await rescheduleAllReminders();
-  if (lastScheduleInfo.error) {
-    alert('重排失败：' + lastScheduleInfo.error);
+  // 每行：[标记, 名称, 人话状态, 修复按钮文字, 修复动作]
+  const rows = [];
+  rows.push(permOk
+    ? ['✅', '通知权限', '已允许', null, null]
+    : ['❌', '通知权限', '没开，提醒发不出来', '去开启', fixNotifyPermission]);
+  rows.push(soundOk
+    ? ['✅', '提醒声音', '会响铃、会震动', null, null]
+    : ['⚠️', '提醒声音', '被系统调成了无声，响了也听不见', '一键修复', fixChannel]);
+  if (count > 0) {
+    rows.push(['✅', '已排提醒', count + ' 条，最早 ' + fmtStamp(nextAt) + ' 响', null, null]);
+  } else if (!hasAnyTime) {
+    rows.push(['ℹ️', '已排提醒', '还没用过：到项目「编辑」里，给时段填一个时间即可', null, null]);
+  } else if (lastOk > 0) {
+    rows.push(['⏳', '已排提醒', '刚排了 ' + lastOk + ' 条，系统确认中；稍等再看，或点「刷新」', null, null]);
   } else {
-    alert('已重排：计划 ' + lastScheduleInfo.planned + ' 条，成功 ' + lastScheduleInfo.scheduled + ' 条。\n再点一次「提醒设置」可以看现在的条数。');
+    rows.push(['❌', '已排提醒', '设了提醒时间，但一条都没排上', '刷新', fixReschedule]);
   }
+
+  // 顶部一句话总结
+  let summary;
+  if (!permOk) summary = '❌ 提醒目前不会响：先开通知权限';
+  else if (count === 0 && hasAnyTime && lastOk === 0) summary = '❌ 提醒没排上，点「刷新」试试';
+  else if (count === 0 && hasAnyTime) summary = '⏳ 提醒刚排上，系统确认中';
+  else if (count === 0) summary = 'ℹ️ 还没使用提醒';
+  else summary = '✅ 提醒已就位' + (nextAt ? '，下一次 ' + fmtStamp(nextAt) : '');
+
+  // 技术细节收进折叠区，想查的人再展开
+  // 「系统」一行是运行时从浏览器指纹（userAgent）里读出来的真实安卓版本，不是写死的
+  const ua = (navigator.userAgent || '').match(/Android\s+([\d.]+)/);
+  const detail = ['系统：' + (ua ? 'Android ' + ua[1] : '非安卓')];
+  if (lastScheduleInfo) {
+    detail.push('未通知数/总通知数：' + lastScheduleInfo.scheduled + '/' + lastScheduleInfo.planned);
+    if (lastScheduleInfo.warning) detail.push('⚠️ ' + lastScheduleInfo.warning);
+    if (lastScheduleInfo.error) detail.push('❌ 报错：' + lastScheduleInfo.error);
+  }
+
+  document.getElementById('rsSummary').textContent = summary;
+  document.getElementById('rsItems').innerHTML = rows.map((r, i) =>
+    '<div class="rs-row"><span class="rs-mark">' + r[0] + '</span><span class="rs-name">' + r[1]
+    + '</span><span class="rs-val">' + r[2] + '</span>'
+    + (r[3] ? '<button class="btn btn-mini" id="rsFix' + i + '">' + r[3] + '</button>' : '')
+    + '</div>').join('');
+  rows.forEach((r, i) => {
+    if (!r[3]) return;
+    document.getElementById('rsFix' + i).onclick = async () => { await r[4](); showReminderStatus(); };
+  });
+  document.getElementById('rsDetailText').textContent = detail.join('\n');
+  document.getElementById('reminderStatusModal').classList.add('active');
+}
+
+function closeReminderStatus() {
+  document.getElementById('reminderStatusModal').classList.remove('active');
+}
+document.getElementById('reminderStatusModal').addEventListener('click', function (e) {
+  if (e.target === this) closeReminderStatus();
+});
+
+/* 面板上每个「去开启 / 一键修复」对应的动作 */
+async function fixNotifyPermission() {
+  if (await ensureNotifyPermission(false)) {
+    await rescheduleAllReminders();   // 权限刚开，顺手把提醒排上
+    return;
+  }
+  alert('通知权限没开成。\n可以到 系统设置 → 应用 → 打卡工具 → 通知 里手动打开。');
+}
+async function fixChannel() {
+  await rebuildChannel();
+  await rescheduleAllReminders();
+}
+async function fixReschedule() {
+  await rescheduleAllReminders();
+}
+
+/* 面板底部「刷新」：先重排，等排完再读一次，否则读到的是旧数字；连点只跑一次 */
+let refreshingStatus = false;
+async function refreshReminderStatus() {
+  if (refreshingStatus) return;
+  refreshingStatus = true;
+  try {
+    await fixReschedule();
+    await showReminderStatus();
+  } finally {
+    refreshingStatus = false;
+  }
+}
+
+/* ---------- 点通知「去打卡」：滚到对应项目的那个时段，并微微闪一下 ---------- */
+let glowTimer = null;
+
+function focusHabit(habitId, dateStr, slot) {
+  const habits = getHabits();
+  const idx = habits.findIndex(h => h.id === habitId);
+  if (idx < 0) return;
+  const h = habits[idx];
+
+  // 卡片没展开就展开；所在月份收着也展开，否则 DOM 里根本没有那一天
+  if (h.expanded === false) h.expanded = true;
+  if (getHabitType(h) === TYPE_DAILY && dateStr) {
+    const monthKey = dateStr.substring(0, 7);
+    const months = h.expandedMonths || [];
+    if (!months.includes(monthKey)) { months.push(monthKey); h.expandedMonths = months; }
+  }
+  saveHabits(habits);
+  renderHabits(false);
+
+  // 等一次重绘（innerHTML 刚换完）再滚
+  setTimeout(() => {
+    const card = document.querySelector('.card[data-habit-id="' + habitId + '"]');
+    if (!card) return;
+    const target = dateStr
+      ? card.querySelector('.date-item[data-date="' + dateStr + '"]')
+      : card;
+    const slotEl = (target && slot !== undefined && slot !== null && slot >= 0)
+      ? target.querySelector('.slot-btn[data-slot="' + slot + '"]')
+      : null;
+
+    if (target && target.scrollIntoView) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (card.scrollIntoView) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    [target || card, slotEl].forEach(el => {
+      if (el && el.classList) el.classList.add('checkin-glow');
+    });
+    clearTimeout(glowTimer);
+    glowTimer = setTimeout(() => {
+      document.querySelectorAll('.checkin-glow').forEach(el => el.classList.remove('checkin-glow'));
+    }, 12000);
+  }, 80);
 }
 
 async function setupReminderChannel() {
@@ -1959,10 +2235,14 @@ async function setupReminderChannel() {
   try {
     LN.addListener('localNotificationActionPerformed', async ev => {
       const extra = (ev && ev.notification && ev.notification.extra) || {};
-      if (ev && ev.actionId === 'skipToday' && extra.checkinHabitId && extra.checkinDate) {
+      if (!extra.checkinHabitId) return;
+      if (ev && ev.actionId === 'skipToday') {
         await cancelDayReminders(extra.checkinHabitId, extra.checkinDate);
         renderHabits();
+        return;
       }
+      // 点通知本体、或点「去打卡」：直接滚到该项目的这一天/这个时段
+      focusHabit(extra.checkinHabitId, extra.checkinDate, extra.checkinSlot);
     });
   } catch (e) {
     console.warn('[提醒] 注册通知动作失败', e);
@@ -2028,7 +2308,17 @@ function isDateInHabit(habit, dateStr) {
   return dateStr <= formatDate(end);
 }
 
-async function rescheduleAllReminders() {
+/* 所有重排串行执行：连点「刷新」或同时触发续排时，
+   避免 cancel/schedule 交叉执行把系统里的提醒搅乱 */
+let rescheduleChain = Promise.resolve();
+function rescheduleAllReminders() {
+  rescheduleChain = rescheduleChain
+    .then(() => doRescheduleAllReminders())
+    .catch(e => { console.warn('[提醒] 重排失败', e); });
+  return rescheduleChain;
+}
+
+async function doRescheduleAllReminders() {
   const LN = getNotifyPlugin();
   if (!LN) return;
   lastScheduleInfo = { at: Date.now(), planned: 0, scheduled: 0, warning: '', error: '', nextAt: null };
@@ -2075,6 +2365,9 @@ async function rescheduleAllReminders() {
       body: it.attempt === 0 ? '点开完成今天的打卡' : '还没打卡，第 ' + (it.attempt + 1) + ' 次提醒',
       channelId: REMIND_CHANNEL,
       schedule: { at: it.at, allowWhileIdle: true },
+      // 精确闹钟没开时显式声明不需要精确：否则插件（默认 exact=true）会在
+      // 每一批 schedule 时弹一次系统设置页，300 条会弹 6 次
+      isExactNotification: exactAlarmOk !== false,
       actionTypeId: REMIND_ACTION_TYPE,
       extra: {
         checkinHabitId: it.habit.id,
@@ -2104,95 +2397,109 @@ async function rescheduleAllReminders() {
   lastScheduleInfo.nextAt = picked.length ? picked[0].at.getTime() : null;
 }
 
-/* ---------- 保存后的「正在和系统对接」弹窗 ---------- */
-let syncExactPending = false;
-
+/* ---------- 保存后的收尾：居中缓冲弹窗 + 回查 ---------- */
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function openSyncModal(text) {
-  const m = document.getElementById('syncModal');
-  if (!m) return;
+let toastTimer = null;
+function showToast(text, ms) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove('show'); }, ms || 3000);
+}
+
+/* 首次使用提醒：把权限一口气都要到手。通知和准点闹钟系统给了申请入口。
+   自启动/省电策略这类厂商限制没有 API 可代开，放在 使用说明 → 问题总览 里常驻，
+   不再弹一次性提示（容易被划走，也容易忘） */
+async function ensureReminderPermissions() {
+  if (!getNotifyPlugin()) return false;
+  if (!await ensureNotifyPermission(false)) {
+    const yes = await showConfirm(
+      '提醒要在通知栏弹出来，需要「通知」权限。\n下一步系统会弹授权框，请点「允许」。',
+      '开启打卡提醒'
+    );
+    if (!yes) return false;
+    if (!await ensureNotifyPermission(false)) {
+      alert('通知权限没开成，提醒不会响。\n可以到 系统设置 → 应用 → 打卡工具 → 通知 里打开，\n再到 右上角 ! → 提醒设置 里重排一次。');
+      return false;
+    }
+  }
+  if (!await refreshExactAlarm()) {
+    const yes = await showConfirm(
+      '还差一个「闹钟和提醒」权限：没开的话，锁屏或退出 App 后\n提醒可能晚几十分钟才来。\n\n现在去开吗？就一个开关，开完会自动回来。',
+      '让提醒准点'
+    );
+    if (yes) {
+      const ok = await openExactAlarmSetting();
+      if (ok) showToast('准点闹钟已打开，提醒会准时响', 3000);
+    }
+    // 没开也继续排：只是不准时，不该拦着用户用
+  }
+  return true;
+}
+
+/* 居中缓冲弹窗：阶段一转圈「正在排入」，阶段二报结果 */
+let syncRunId = 0;   // 连续保存时，只让最后一次收尾，避免旧的一次覆盖新弹窗
+
+function openSyncModal() {
   document.getElementById('syncSpinner').style.display = '';
   document.getElementById('syncBtns').style.display = 'none';
-  document.getElementById('syncTitle').textContent = '正在和系统对接…';
-  document.getElementById('syncText').textContent = text || '正在把提醒写进系统闹钟队列，请稍等，先别退出 App。';
-  m.classList.add('active');
+  document.getElementById('syncTitle').textContent = '正在向系统排入通知';
+  document.getElementById('syncText').textContent = '请等待几秒…';
+  document.getElementById('syncModal').classList.add('active');
 }
 
-function setSyncText(t) {
-  const el = document.getElementById('syncText');
-  if (el) el.textContent = t;
-}
-
-function finishSyncModal(text) {
+function finishSyncModal(mainHtml, hintHtml) {
   document.getElementById('syncSpinner').style.display = 'none';
-  document.getElementById('syncTitle').textContent = '提醒已就位';
-  document.getElementById('syncText').textContent = text;
+  document.getElementById('syncTitle').textContent = '提醒已排入';
+  document.getElementById('syncText').innerHTML =
+    '<div class="sync-count">' + mainHtml + '</div>'
+    + (hintHtml ? '<div class="sync-hint">' + hintHtml + '</div>' : '');
   document.getElementById('syncBtns').style.display = '';
 }
 
 function closeSyncModal() {
   document.getElementById('syncModal').classList.remove('active');
-  // 精确闹钟没开的话，等这个弹窗关了再问，免得两个弹窗叠一起
-  if (syncExactPending) {
-    syncExactPending = false;
-    askExactAlarmIfNeeded(true);
-  }
 }
 
-/* 保存/修改完项目后走这一条：要权限 → 真排一遍 → 回查 → 把结果摊开 */
+/* 排完跟系统核对：500ms 一查、最多 5 秒。对不上也照常报数，不拦用户 */
+async function verifyScheduleSoon() {
+  const want = lastScheduleInfo.scheduled;
+  for (let i = 0; i < 10; i++) {
+    await sleep(500);
+    if ((await getCheckinPending()).length >= want) return true;
+  }
+  return false;
+}
+
+/* 保存/修改完项目后走这一条：权限要全 → 排 → 居中缓冲弹窗两阶段报结果 */
 async function applyReminders(reminderTimes) {
   const hasTime = Array.isArray(reminderTimes) && reminderTimes.some(t => t);
   if (!hasTime) { await rescheduleAllReminders(); return; }
 
-  const started = Date.now();
+  if (!await ensureReminderPermissions()) return;
+
+  // 弹窗在真正开始排程前就出来，用户看到的是「正在排入」，不是「排完了还在转」
+  const runId = ++syncRunId;
   openSyncModal();
-
-  if (!notifyPermission) {
-    setSyncText('提醒要在通知栏弹出来，需要通知权限。\n下一步系统会弹一个授权框，请点「允许」。');
-    await sleep(350);
-  }
-
-  const ok = await ensureNotifyPermission(false);
-  if (!ok) {
-    closeSyncModal();
-    alert('通知权限被拒绝了，提醒不会响。\n请到 系统设置 → 应用 → 打卡工具 → 通知 里允许。');
-    return;
-  }
-
-  setSyncText('正在把提醒写进系统闹钟队列，请稍等，先别退出 App。');
-  await refreshExactAlarm();
   await rescheduleAllReminders();
-
-  // 回查系统：给落盘一点时间，查不到就再试一次
-  let list = await getCheckinPending();
-  if (!list.length && lastScheduleInfo.scheduled > 0) {
-    await sleep(500);
-    list = await getCheckinPending();
-  }
-  const sysCount = list.length;
-
-  // 至少停 1.2 秒，让人看得见「确实对接过」
-  const elapsed = Date.now() - started;
-  if (elapsed < 1200) await sleep(1200 - elapsed);
-
+  if (runId !== syncRunId) return;          // 期间又保存了一次，交给后一次收尾
   if (lastScheduleInfo.error) {
-    finishSyncModal('排提醒失败：' + lastScheduleInfo.error + '\n\n稍后可以到右上角 ! → 提醒设置 里重排一次。');
+    closeSyncModal();
+    alert('排提醒失败：' + lastScheduleInfo.error + '\n\n稍后可以到右上角 ! → 提醒设置 里重排一次。');
     return;
   }
+  if (!lastScheduleInfo.scheduled) { closeSyncModal(); return; }   // 没排上任何东西（比如都打过了卡），不打扰
 
-  let text = '已排 ' + lastScheduleInfo.scheduled + ' 条提醒';
-  if (lastScheduleInfo.nextAt) text += '，最早 ' + fmtStamp(lastScheduleInfo.nextAt) + ' 会提醒';
-  text += '\n系统回查：' + sysCount + ' 条';
-  if (sysCount < lastScheduleInfo.scheduled) {
-    text += '\n（回查数字偏小只是还没完全落盘，已经排上的闹钟不受影响）';
-  }
-  if (!exactAlarmOk) {
-    text += '\n\n⚠️ 精确闹钟没开，锁屏后提醒可能不准时。';
-    syncExactPending = true;
-  }
-  text += '\n\n现在可以放心退出 App 了。';
-  finishSyncModal(text);
+  await verifyScheduleSoon();
+  if (runId !== syncRunId) return;
+  const next = lastScheduleInfo.nextAt ? fmtStamp(lastScheduleInfo.nextAt) : '';
+  finishSyncModal(
+    '已排 ' + lastScheduleInfo.scheduled + ' 条提醒' + (next ? '，最早 ' + next + ' 响' : ''),
+    '可在右上角【!】里查看通知提醒状态和【问题总览】'
+  );
 }
 
 function scheduleRemindersSoon() {
@@ -2222,8 +2529,14 @@ async function initReminders() {
 function setupResumeReschedule() {
   const AppPlugin = (typeof Capacitor !== 'undefined' && Capacitor.Plugins) ? Capacitor.Plugins.App : null;
   if (!AppPlugin || !AppPlugin.addListener) return;
-  AppPlugin.addListener('appStateChange', st => {
-    if (st && st.isActive) scheduleRemindersSoon();
+  AppPlugin.addListener('appStateChange', async st => {
+    if (!st || !st.isActive) return;
+    // 从系统设置回来可能刚开了「精确闹钟」，先刷新再排，否则会继续按不精确排
+    await refreshExactAlarm();
+    scheduleRemindersSoon();
+    // 提醒设置面板开着时从系统设置回来，各项状态自动刷新（随系统实时变）
+    const rs = document.getElementById('reminderStatusModal');
+    if (rs && rs.classList.contains('active')) showReminderStatus();
   });
 }
 
@@ -2253,10 +2566,11 @@ async function testReminder() {
     await LN.schedule({
       notifications: [{
         id: 19999,
-        title: '测试提醒（10 秒后）',
-        body: '这条响了说明闹钟真的排进系统了',
+        title: '测试成功',
+        body: '通知已正常送达，打卡提醒功能可用',
         channelId: REMIND_CHANNEL,
-        schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }
+        schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true },
+        isExactNotification: exactAlarmOk !== false
       }]
     });
   } catch (e) {
@@ -2264,22 +2578,40 @@ async function testReminder() {
     return;
   }
 
-  // 关键：问系统确认这条真的进去了，再放用户去锁屏。
-  // 否则「刚点完就切后台」会出现「其实没排上，回来才补发」的假象。
+  // 关键：问系统确认这条真的进去了，再放用户走。
   const ids = await pendingIds();
   if (ids.indexOf(19999) === -1) {
-    alert('⚠️ 系统里没查到这条闹钟，等于没排上。\n\n先别切后台。\n请再点一次「测试提醒」；如果还是查不到，把这句话告诉我。');
+    showNotice('系统里没查到这条闹钟',
+      '<p>等于没排上，先别清除后台。</p>'
+      + '<p>请再点一次「测试提醒功能」；如果还是查不到，<br>请看右上角【!】→【问题总览】。</p>');
     return;
   }
-  alert('已确认排进系统闹钟队列 ✅\n\n现在可以锁屏、切后台，10 秒后会响。\n（如果没响，拉下通知栏看有没有一条时间对得上的）');
+  showNotice('10 秒后会发出通知提醒',
+    '<p class="notice-em">现在可以退出并清除软件后台</p>'
+    + '<p>收到通知 = 测试成功<br>未收到通知 = 查看右上角【!】→【问题总览】</p>');
+}
+
+/* ---------- 启动动画：等首屏渲染完再淡出，避免看到白底 ---------- */
+function hideSplash() {
+  const el = document.getElementById('splash');
+  if (!el) return;
+  el.classList.add('out');
+  setTimeout(() => {
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }, 800);
 }
 
 /* ---------- 启动 ---------- */
 document.addEventListener('DOMContentLoaded', async function () {
+  loadUiScale();
+  applySplashSetting();
+  applyTheme();
   await loadHabitsFromStorage();
   renderHabits(false);
   setupBackButton();
   setupResumeReschedule();
+  // 先把首屏铺好，再收启动动画（放慢一点，让人看清图标）
+  setTimeout(hideSplash, 1600);
   await initReminders();
 
   setTimeout(() => {

@@ -7,8 +7,31 @@
   <meta name="mobile-web-app-capable" content="yes">
   <title>打卡工具</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    // 开屏动画 / 主题要在首屏绘制前读到，否则会先闪一下默认配色
+    try {
+      if (localStorage.getItem('checkin_splash_off_v1') === '1') {
+        document.documentElement.classList.add('no-splash');
+      }
+      var __theme = localStorage.getItem('checkin_theme_v1');
+      var __themes = ['green', 'ocean', 'sunset', 'sakura', 'teal', 'peach',
+                      'taro', 'matcha', 'mist', 'dusk', 'aurora'];
+      if (__theme && __themes.indexOf(__theme) > -1) {
+        document.documentElement.setAttribute('data-theme', __theme);
+      }
+    } catch (e) { /* 读不到就按默认处理 */ }
+  </script>
 </head>
 <body>
+
+<!-- 启动动画：整屏图标绿 + 居中图标形象，1 秒后淡出 -->
+<div id="splash" aria-hidden="true">
+  <svg class="splash-mark" viewBox="0 0 200 200">
+    <circle class="splash-ring splash-ring-1" cx="100" cy="100" r="76"></circle>
+    <circle class="splash-ring splash-ring-2" cx="100" cy="100" r="60"></circle>
+    <path class="splash-check" d="M62 103 L89 130 L140 72"></path>
+  </svg>
+</div>
 
 <!-- 右上角帮助按钮 -->
 <div class="help-btn" onclick="openHelpModal()" title="使用说明">!</div>
@@ -28,7 +51,7 @@
   <div id="habitList"></div>
 
   <div class="add-card" onclick="openModal()">
-    <div class="icon">➕</div>
+    <div class="icon add-plus">+</div>
     <div class="text">添加打卡 / 记录</div>
   </div>
 
@@ -41,7 +64,7 @@
 
     <div class="form-group">
       <label>名称</label>
-      <input type="text" id="habitName" placeholder="例如：每日运动 / 借款记录" maxlength="20">
+      <input type="text" id="habitName" placeholder="例如：每日运动 / 临时任务" maxlength="20">
     </div>
 
     <div class="form-group">
@@ -91,7 +114,8 @@
       </div>
 
       <div class="form-group" id="reminderGroup">
-        <label>打卡提醒（选填）<span class="label-hint">到点提醒，没打卡每 10 分钟再提醒，最多 3 次</span></label>
+        <label class="reminder-title">打卡提醒（选填）<span class="label-hint">到点提醒，没打卡每 10 分钟再提醒，共 3 次</span></label>
+        <div class="reminder-notice">⚠️ 使用此功能需手动打开该应用的【自启动】</div>
         <div class="reminder-list" id="reminderInputs"></div>
       </div>
     </div>
@@ -136,7 +160,7 @@
     <div class="item-modal-hint" id="itemModalHint">保存后可以接着加下一条</div>
     <div class="modal-btns">
       <button class="btn btn-cancel" id="itemDone">完成</button>
-      <button class="btn btn-confirm" id="itemSave">保存</button>
+      <button class="btn btn-confirm" id="itemSave">确定</button>
     </div>
   </div>
 </div>
@@ -181,17 +205,38 @@
   </div>
 </div>
 
-<!-- 保存后「正在和系统对接」的等待弹窗 -->
+<!-- 保存提醒后的居中缓冲弹窗：先转圈，再报结果 -->
 <div class="modal-overlay" id="syncModal">
   <div class="modal sync-modal">
     <div class="sync-spinner" id="syncSpinner"></div>
-    <h2 id="syncTitle">正在和系统对接…</h2>
-    <div class="sync-text" id="syncText">正在把提醒写进系统闹钟队列，请稍等，先别退出 App。</div>
+    <h2 id="syncTitle">正在向系统排入通知</h2>
+    <div class="sync-text" id="syncText">请等待几秒…</div>
     <div class="modal-btns" id="syncBtns" style="display:none">
       <button class="btn btn-confirm" onclick="closeSyncModal()">完成</button>
     </div>
   </div>
 </div>
+
+<!-- 提醒设置面板：四个环节各一行，问题当场修 -->
+<div class="modal-overlay" id="reminderStatusModal">
+  <div class="modal rs-modal">
+    <h2>🔔 提醒设置</h2>
+    <div class="rs-summary" id="rsSummary"></div>
+    <div id="rsItems"></div>
+    <details class="rs-detail">
+      <summary>详细信息</summary>
+      <div class="rs-detail-text" id="rsDetailText"></div>
+    </details>
+    <div class="modal-btns">
+      <button class="btn btn-cancel" onclick="refreshReminderStatus()">刷新</button>
+      <button class="btn btn-cancel" onclick="closeReminderStatus(); testReminder()">测试提醒功能</button>
+      <button class="btn btn-confirm" onclick="closeReminderStatus()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 轻提示：不挡操作，几秒后自己消失 -->
+<div id="toast"></div>
 
 <!-- 时间选择弹窗：上面输入，下面双指针表盘（外圈时 / 内圈分） -->
 <div class="modal-overlay" id="timePickerModal">
@@ -236,70 +281,165 @@
 
 <!-- 使用说明弹窗 -->
 <div class="modal-overlay" id="helpModal">
+  <div class="modal help-modal">
+    <div class="help-tabs">
+      <button class="help-tab active" id="helpTabGuide" onclick="switchHelpTab('guide')">📖 使用说明</button>
+      <button class="help-tab" id="helpTabTools" onclick="switchHelpTab('tools')">🔧 功能</button>
+    </div>
+
+    <!-- 卡片一：使用说明 -->
+    <div id="helpPaneGuide">
+      <div class="help-scroll">
+      <div class="help-content">
+        <div class="help-sec">
+          <div class="help-h">📋 每日打卡</div>
+          <div class="help-line">每天 1 次打卡：点击整行任意位置可打卡，再点一次取消</div>
+          <div class="help-line">每天 2/3 次打卡：点对应时段的小圆钮可打卡</div>
+          <div class="help-line">✏️：可编辑修改整个打卡属性</div>
+          <div class="help-line">导出此项：单独导出该打卡记录</div>
+        </div>
+        <div class="help-sec">
+          <div class="help-h">✅ 记录清单</div>
+          <div class="help-line">点整行：打勾 / 取消</div>
+          <div class="help-line">条目右侧 ✏️：改文字</div>
+          <div class="help-line">底部「＋ 添加一条」：输入后点「确定」，可连续录入，点「完成」收起</div>
+          <div class="help-line">导出此项：单独导出该打卡记录</div>
+        </div>
+        <div class="help-sec">
+          <div class="help-h">🔒 锁定与防误删</div>
+          <div class="help-line">长按整行：锁定这一条</div>
+          <div class="help-line">卡片上的 🔓：一键锁定全部（锁定期间，通知不再提醒）</div>
+          <div class="help-line">长按 🗑️：可锁定删除按钮，防止误删</div>
+        </div>
+        <div class="help-sec">
+          <div class="help-h">📤 备份</div>
+          <div class="help-line">「导出全部」：导出所有打卡记录</div>
+          <div class="help-line">「导入备份」：选择从该 app 导出的 .json 格式的文件导入</div>
+          <div class="help-line">数据只存手机本地，卸载 App 会丢失，建议定期导出</div>
+        </div>
+        <div class="help-sec">
+          <div class="help-h">🔔 打卡提醒</div>
+          <div class="help-line">位置：项目属性编辑界面 →「设置时间」</div>
+          <div class="help-line">到点没打卡：立刻提醒，之后每 10 分钟再提醒一次，总共 3 次</div>
+          <div class="help-line">点击系统弹出通知上的「今天不再提醒」：当天所有提醒取消</div>
+          <div class="help-line">改时间或删时间：旧提醒会自动撤掉</div>
+          <div class="help-line">提前排 14 天，打开 App 会自动续排</div>
+        </div>
+        <div class="help-sec">
+          <div class="help-h">🧪 测试提醒</div>
+          <div class="help-line">右上角【!】→ 提醒设置 →「测试提醒功能」</div>
+          <div class="help-line">会提示「10 秒后会发出通知提醒」</div>
+          <div class="help-line">收到 = 正常；没收到 = 按「问题总览」检查</div>
+        </div>
+      </div>
+      <div class="help-issues">
+        <div class="help-issues-title">❓ 问题总览</div>
+        <button class="help-issue-link" onclick="showTrouble('no-notify')">到设置的提醒时间后未收到通知？</button>
+      </div>
+      </div>
+      <div class="modal-btns">
+        <button class="btn btn-cancel" onclick="showReminderStatus()">提醒设置</button>
+        <button class="btn btn-confirm" onclick="closeHelpModal()">关闭</button>
+      </div>
+    </div>
+
+    <!-- 卡片二：功能设置 -->
+    <div id="helpPaneTools" style="display:none;">
+      <div class="help-scroll">
+      <div class="tool-row">
+        <div class="tool-label">字体大小</div>
+        <div class="font-scale">
+          <button class="fs-btn" onclick="changeUiScale(-1)" aria-label="缩小字体">A−</button>
+          <span class="fs-value" id="fontScaleVal">默认</span>
+          <button class="fs-btn" onclick="changeUiScale(1)" aria-label="放大字体">A+</button>
+        </div>
+      </div>
+      <div class="tool-row">
+        <div class="tool-label">开屏动画</div>
+        <button class="switch on" id="splashToggle" role="switch" aria-checked="true"
+                aria-label="开屏动画" onclick="toggleSplash()">
+          <span class="switch-knob"></span>
+        </button>
+      </div>
+      <div class="tool-row tool-row-col">
+        <div class="tool-label">主题</div>
+        <div class="theme-grid">
+          <button class="theme-item active" id="themeItem_default" aria-pressed="true" onclick="setTheme('default')">
+            <span class="theme-swatch" style="--sw1:#667eea;--sw2:#8f7ae0;--sw3:#764ba2"></span>
+            <span class="theme-name">经典紫</span>
+          </button>
+          <button class="theme-item" id="themeItem_green" aria-pressed="false" onclick="setTheme('green')">
+            <span class="theme-swatch" style="--sw1:#dff3e4;--sw2:#92c9a8;--sw3:#3f8f63"></span>
+            <span class="theme-name">森林绿</span>
+          </button>
+          <button class="theme-item" id="themeItem_ocean" aria-pressed="false" onclick="setTheme('ocean')">
+            <span class="theme-swatch" style="--sw1:#e6f3fc;--sw2:#a3cbe8;--sw3:#2f7fae"></span>
+            <span class="theme-name">海盐蓝</span>
+          </button>
+          <button class="theme-item" id="themeItem_sunset" aria-pressed="false" onclick="setTheme('sunset')">
+            <span class="theme-swatch" style="--sw1:#fff0e2;--sw2:#f6b49c;--sw3:#c96b45"></span>
+            <span class="theme-name">落日橙</span>
+          </button>
+          <button class="theme-item" id="themeItem_sakura" aria-pressed="false" onclick="setTheme('sakura')">
+            <span class="theme-swatch" style="--sw1:#fff2f7;--sw2:#f8bcd4;--sw3:#c96a95"></span>
+            <span class="theme-name">樱花粉</span>
+          </button>
+          <button class="theme-item" id="themeItem_teal" aria-pressed="false" onclick="setTheme('teal')">
+            <span class="theme-swatch" style="--sw1:#e6fbf6;--sw2:#9fdfd0;--sw3:#2f8f80"></span>
+            <span class="theme-name">薄荷青</span>
+          </button>
+          <button class="theme-item" id="themeItem_peach" aria-pressed="false" onclick="setTheme('peach')">
+            <span class="theme-swatch" style="--sw1:#fff4e9;--sw2:#f6b8a8;--sw3:#cd7a5a"></span>
+            <span class="theme-name">蜜桃乌龙</span>
+          </button>
+          <button class="theme-item" id="themeItem_taro" aria-pressed="false" onclick="setTheme('taro')">
+            <span class="theme-swatch" style="--sw1:#f4eefc;--sw2:#cbb8ea;--sw3:#8063b5"></span>
+            <span class="theme-name">香芋拿铁</span>
+          </button>
+          <button class="theme-item" id="themeItem_matcha" aria-pressed="false" onclick="setTheme('matcha')">
+            <span class="theme-swatch" style="--sw1:#f5f9e9;--sw2:#c8dfb4;--sw3:#6f9a4c"></span>
+            <span class="theme-name">抹茶奶绿</span>
+          </button>
+          <button class="theme-item" id="themeItem_mist" aria-pressed="false" onclick="setTheme('mist')">
+            <span class="theme-swatch" style="--sw1:#f0f3f7;--sw2:#c0ccda;--sw3:#687d94"></span>
+            <span class="theme-name">雾灰蓝</span>
+          </button>
+          <button class="theme-item" id="themeItem_dusk" aria-pressed="false" onclick="setTheme('dusk')">
+            <span class="theme-swatch" style="--sw1:#ffe6c9;--sw2:#ffc3c9;--sw3:#d9a3e0"></span>
+            <span class="theme-name">晚霞</span>
+          </button>
+          <button class="theme-item" id="themeItem_aurora" aria-pressed="false" onclick="setTheme('aurora')">
+            <span class="theme-swatch" style="--sw1:#d9f7f2;--sw2:#cfe3fb;--sw3:#e4d4f8"></span>
+            <span class="theme-name">极光</span>
+          </button>
+        </div>
+      </div>
+      </div>
+      <div class="modal-btns">
+        <button class="btn btn-confirm" onclick="closeHelpModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 问题说明弹窗（从「问题总览」进入，内容由 TROUBLE_GUIDE 提供） -->
+<div class="modal-overlay" id="troubleModal">
   <div class="modal">
-    <h2>📖 使用说明</h2>
-    <div class="help-content">✅ 每日打卡
-  • 每日 1 次：点整行任意位置都能打卡
-  • 每日 2/3 次：点对应时段的小圆钮
-  • 长按日期：锁定/解锁单日
-  • 点日期旁的 🗨️ 添加备注（200 字以内）
+    <h2 id="troubleTitle"></h2>
+    <div class="trouble-body" id="troubleBody"></div>
+    <div class="modal-btns modal-btns-right">
+      <button class="btn btn-confirm" onclick="closeTroubleModal()">关闭</button>
+    </div>
+  </div>
+</div>
 
-📋 记录清单
-  • 点整行：打勾 / 取消打勾
-  • 长按整行：锁定 / 解锁该条
-  • 右侧 ✏️：改文字，改完按回车保存
-  • 右侧 🗑️：删除该条（会先问一次）
-  • 卡片底部「＋ 添加一条」：弹出输入框，输入后点「保存」
-    保存后弹窗不关，可以接着记下一条；记完点「完成」收起
-
-🔒 通用锁定
-  • 长按日期或清单条目：锁定 / 解锁单项
-  • 卡片上的 🔓 按钮：锁定全部
-  • 长按删除按钮：锁定删除，防误删
-
-📤 备份与恢复
-  • 导出全部：顶部「导出全部」
-  • 导出单项：展开卡片 → 「导出此项」
-  • 导入：点「导入备份」选 .json 文件，再选导入方式
-    · 合并导入：保留原有数据，只追加新的
-    · 完全替换：清空原有数据（会再确认一次）
-
-📅 天数调整（仅每日打卡）
-  • 展开卡片 → 底部 +1 / +7 / +30 天
-  • 减天数：-1 / -7 / -30 天
-  • 减少天数会删掉末尾的记录（备注、锁定一起清）
-  • 锁了「全部锁定」🔒 后天数按钮不可用
-
-🔔 打卡提醒（仅每日打卡）
-  • 在「编辑」窗口的自定义时段下面填时间，选填
-  • 到点没打卡：每 10 分钟再提醒一次，最多 3 次
-  • 点掉某条提醒 = 这个时段今天不再提醒，其他时段照旧
-  • 「今天不再提醒」= 当天所有时段都停
-  • 已经打了卡的时段，当天不会提醒
-  • 改时间或删时间，旧的提醒会一起撤掉
-  • 提前排 14 天，打开 App 时自动续排
-
-⚠️ 提醒不准时怎么办
-  • 先点下面的「提醒设置」看状态
-  • 「精确闹钟」没允许 → 手机会把提醒攒着发，息屏后可能很晚才响
-  • 国产系统（小米/华为/OPPO/vivo）还要在
-    设置 → 应用 → 打卡工具 里打开「自启动」「后台无限制」
-  • 小米：自启动 + 省电策略「无限制」；华为：应用启动管理改「手动管理」
-  • OPPO/vivo：允许自启动 + 允许后台活动
-  • 电池省电模式也可能压掉提醒，建议给本应用关掉
-
-🧪 怎么验一次
-  • 点「测试提醒」会排一条 60 秒后的
-  • 立刻锁屏、手机放下别碰、等 1 分钟
-  • 只在 App 里盯着看是测不出来的（前台一定会响）
-
-💡 温馨提示
-  • 数据保存在手机本地，卸载应用会丢失
-  • 请定期导出备份</div>
-    <div class="modal-btns modal-btns-3">
-      <button class="btn btn-cancel" onclick="showReminderStatus()">提醒设置</button>
-      <button class="btn btn-cancel" onclick="testReminder()">测试提醒</button>
-      <button class="btn btn-confirm" onclick="closeHelpModal()">我知道了</button>
+<!-- 测试提醒的结果/等待提示（比原生 alert 醒目） -->
+<div class="modal-overlay" id="noticeModal">
+  <div class="modal notice-modal">
+    <h2 id="noticeTitle"></h2>
+    <div class="notice-body" id="noticeBody"></div>
+    <div class="modal-btns modal-btns-right">
+      <button class="btn btn-confirm" onclick="closeNoticeModal()">知道了</button>
     </div>
   </div>
 </div>
