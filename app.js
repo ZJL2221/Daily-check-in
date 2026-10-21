@@ -2613,8 +2613,8 @@ document.addEventListener('DOMContentLoaded', async function () {
   renderHabits(false);
   setupBackButton();
   setupResumeReschedule();
-  // 先把首屏铺好，再收启动动画（放慢一点，让人看清图标）
-  setTimeout(hideSplash, 1600);
+  // 先把首屏铺好，再收启动动画（1.3s：对勾画完后略停一下）
+  setTimeout(hideSplash, 1300);
   await initReminders();
 
   setTimeout(() => {

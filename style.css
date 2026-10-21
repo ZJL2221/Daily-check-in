@@ -857,9 +857,9 @@ body {
   display: flex; align-items: center; justify-content: center;
   background: radial-gradient(circle at 50% 36%, #93e37f 0%, #6acb5c 42%, #47a83f 100%);
   pointer-events: none;
-  animation: splashFade 0.65s ease 2.0s forwards;
+  animation: splashFade 0.6s ease 1.7s forwards;
 }
-#splash.out { animation: none; opacity: 0; transition: opacity 0.65s ease; }
+#splash.out { animation: none; opacity: 0; transition: opacity 0.6s ease; }
 html.no-splash #splash { display: none !important; }
 @keyframes splashFade { to { opacity: 0; visibility: hidden; } }
 .splash-mark { width: 134px; height: 134px; }
