@@ -115,7 +115,7 @@
 
       <div class="form-group" id="reminderGroup">
         <label class="reminder-title">打卡提醒（选填）<span class="label-hint">到点提醒，没打卡每 10 分钟再提醒，共 3 次</span></label>
-        <div class="reminder-notice">⚠️ 使用此功能需手动打开该应用的【自启动】</div>
+        <div class="reminder-notice">⚠️ 使用此功能需手动打开该应用的【自启动】，并将【省电策略】改成「无限制」</div>
         <div class="reminder-list" id="reminderInputs"></div>
       </div>
     </div>
@@ -320,8 +320,8 @@
         <div class="help-sec">
           <div class="help-h">🔔 打卡提醒</div>
           <div class="help-line">位置：项目属性编辑界面 →「设置时间」</div>
+          <div class="help-line">需开启【自启动】，并将【省电策略】设为「无限制」</div>
           <div class="help-line">到点没打卡：立刻提醒，之后每 10 分钟再提醒一次，总共 3 次</div>
-          <div class="help-line">点击系统弹出通知上的「今天不再提醒」：当天所有提醒取消</div>
           <div class="help-line">改时间或删时间：旧提醒会自动撤掉</div>
           <div class="help-line">提前排 14 天，打开 App 会自动续排</div>
         </div>
@@ -332,10 +332,10 @@
           <div class="help-line">收到 = 正常；没收到 = 按「问题总览」检查</div>
         </div>
       </div>
+      </div>
       <div class="help-issues">
         <div class="help-issues-title">❓ 问题总览</div>
         <button class="help-issue-link" onclick="showTrouble('no-notify')">到设置的提醒时间后未收到通知？</button>
-      </div>
       </div>
       <div class="modal-btns">
         <button class="btn btn-cancel" onclick="showReminderStatus()">提醒设置</button>
@@ -361,8 +361,8 @@
           <span class="switch-knob"></span>
         </button>
       </div>
-      <div class="tool-row tool-row-col">
-        <div class="tool-label">主题</div>
+      <details class="theme-fold">
+        <summary class="theme-summary">主题 <span class="theme-current" id="themeCurrent">经典紫</span></summary>
         <div class="theme-grid">
           <button class="theme-item active" id="themeItem_default" aria-pressed="true" onclick="setTheme('default')">
             <span class="theme-swatch" style="--sw1:#667eea;--sw2:#8f7ae0;--sw3:#764ba2"></span>
@@ -413,7 +413,16 @@
             <span class="theme-name">极光</span>
           </button>
         </div>
-      </div>
+        <div class="theme-preview" aria-hidden="true">
+          <div class="tpv-header">打卡工具</div>
+          <div class="tpv-chips"><span></span><span></span></div>
+          <div class="tpv-card">
+            <div class="tpv-title">每日运动 <span>3/10</span></div>
+            <div class="tpv-bar"><i></i></div>
+            <div class="tpv-slots"><b class="on">①</b><b>②</b></div>
+          </div>
+        </div>
+      </details>
       </div>
       <div class="modal-btns">
         <button class="btn btn-confirm" onclick="closeHelpModal()">关闭</button>

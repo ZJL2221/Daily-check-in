@@ -7,8 +7,21 @@ const STORAGE_KEY = 'checkin_habits_v5';
 let habitsCache = [];
 function getHabits() { return habitsCache; }
 
+/* 所有项目都必须有稳定 id（通知定位、取消、去打卡都靠它） */
+function ensureHabitIds(habits) {
+  let changed = false;
+  habits.forEach(h => {
+    if (typeof h.id !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(h.id)) {
+      h.id = newHabitId();
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 /* ---------- 数据加载与保存 ---------- */
 async function saveHabits(habits) {
+  ensureHabitIds(habits);
   habits.forEach((h, i) => { h.order = i; });
   habitsCache = habits;
   try {
@@ -398,7 +411,6 @@ async function deleteHabit(i, habitRef) {
   const removed = h.splice(idx, 1)[0];
   if (removed && removed.id) {
     cancelHabitReminders(removed.id);
-    if (muteCache[removed.id]) { delete muteCache[removed.id]; saveMutes(); }
   }
   saveHabits(h);
   renderHabits();
@@ -1228,6 +1240,7 @@ async function saveHabit() {
   const name = document.getElementById('habitName').value.trim();
   const type = selectedType || TYPE_DAILY;
   const habits = getHabits();
+  let savedId = '';
 
   if (!name) { alert('请输入名称'); return; }
 
@@ -1238,6 +1251,7 @@ async function saveHabit() {
       habits[editingIndex].type = TYPE_LIST;
     } else {
       habits.push({
+        id: newHabitId(),
         type: TYPE_LIST,
         name,
         items: [],
@@ -1310,10 +1324,12 @@ async function saveHabit() {
     old.expandedMonths = (old.expandedMonths || []).filter(m => validMonths.has(m));
     ensureExpandedMonths(old);
     saveHabits(habits);
+    savedId = old.id;
     closeModal();
     renderHabits();
   } else {
     const created = {
+      id: newHabitId(),
       type: TYPE_DAILY,
       name, startDate, totalDays, mode, slotNames, reminderTimes,
       completedDates: [], completedCounts: {}, notes: {},
@@ -1323,11 +1339,12 @@ async function saveHabit() {
     ensureExpandedMonths(created);
     habits.push(created);
     saveHabits(habits);
+    savedId = created.id;
     closeModal();
     renderHabits();
   }
 
-  await applyReminders(reminderTimes);
+  await applyReminders(reminderTimes, savedId);
 }
 
 /* ============ 渲染 ============ */
@@ -1377,7 +1394,7 @@ function renderCardActions(habit, habitIndex, total) {
                 onmousedown="startDeletePress(${habitIndex}, event)"
                 onmouseup="endDeletePress(${habitIndex}, event)"
                 onmouseleave="cancelDeletePress(event)"
-                title="${isDeleteLocked ? '已锁定，长按解锁' : '短按删除，长按锁定'}">${isDeleteLocked ? '🔒' : '🗑️'}</button>
+                title="${isDeleteLocked ? '已锁定，长按解锁' : '短按删除，长按锁定'}">🗑️</button>
         <span class="arrow ${isExpanded ? 'expanded' : ''}">▼</span>
       </div>
     </div>`;
@@ -1483,7 +1500,7 @@ function renderDailyCard(habit, habitIndex, total) {
       </div>
 
       <div class="date-list ${isExpanded ? 'expanded' : ''}">
-        <div class="long-press-hint">💡 长按整行可锁定/解锁 · 点击 🗨️ 添加备注</div>
+        <div class="long-press-hint">💡 长按整行可锁定/解锁 · 点击 🗨️ 添加备注 · 点击卡片上的🔓 ：一键锁定全部打卡（锁定期间不再收到该打卡通知）</div>
         ${renderDateSection(habit, habitIndex, dates, mode, lockedDates, isMasterLocked)}
         <div class="habit-footer">
           <button class="btn-small btn-check-all" onclick="checkAll(${habitIndex}, true)" ${isMasterLocked ? 'disabled' : ''}>全部打卡</button>
@@ -1717,6 +1734,8 @@ function applyTheme() {
     if (name === 'default') root.removeAttribute('data-theme');
     else root.setAttribute('data-theme', name);
   }
+  const cur = document.getElementById('themeCurrent');
+  if (cur) cur.textContent = THEME_LABELS[name] || '经典紫';
   THEMES.forEach(t => {
     const el = document.getElementById('themeItem_' + t);
     if (!el || !el.classList) return;
@@ -1738,14 +1757,12 @@ const TROUBLE_GUIDE = {
   'no-notify': {
     title: '到设置的提醒时间后未收到通知？',
     html: '<p>请按顺序检查：</p>'
-      + '<p><b>① 检查通知权限</b><br>关掉本窗口，点下面的「提醒设置」，看「通知权限」是不是 ✅。'
-      + '不是的话，点那一行的「去开启」。</p>'
-      + '<p><b>② 检查自启动</b><br>设置 → 应用 → 打卡工具 → 打开「自启动」。<br>'
-      + '退出 App 后系统无法发送通知。</p>'
-      + '<p><b>③ 挂在后台收不到通知（可选，不推荐）</b><br>'
-      + '在该应用的省电策略为默认情况下，如果 App 挂在后台，会无法收到弹窗通知，'
-      + '只有返回前台时才会收到弹窗通知。<br>'
-      + '如果你想让该 App 在后台常驻的情况下依然能收到通知，请将「省电策略」改成「无限制」。</p>'
+      + '<p><b>① 检查【通知权限】</b><br>未开启【通知权限】，提醒无法弹出。<br>'
+      + '设置 → 应用 → 打卡工具 → 通知 → 允许通知。</p>'
+      + '<p><b>② 检查【自启动】</b><br>未开启该应用的【自启动】，退出 App 后系统无法发送通知。<br>'
+      + '设置 → 应用 → 打卡工具 → 打开「自启动」。</p>'
+      + '<p><b>③ 检查【省电策略】</b><br>未将【省电策略】设为「无限制」，App 挂在后台会被系统冻结，无法收到通知。<br>'
+      + '设置 → 应用 → 打卡工具 → 省电策略 → 选择「无限制」。</p>'
   }
 };
 
@@ -1873,52 +1890,6 @@ let reminderTimer = null;
 let exactAlarmOk = true;        // 「精确闹钟」权限；默认 true，免得没查就骚扰用户
 let exactAlarmWarned = false;   // 每次启动只提示一次
 let lastScheduleInfo = null;    // 最近一次排提醒的结果，诊断页要用
-
-/* 「今天不再提醒」要记住，否则下次回前台续排时又会被排回来 */
-const MUTE_KEY = 'checkin_mutes_v1';   // { habitId: { 'YYYY-MM-DD': 1 } }
-let muteCache = {};
-
-async function loadMutes() {
-  try {
-    const raw = await Storage.get(MUTE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    muteCache = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-  } catch (e) {
-    console.warn('[提醒] 读取静音记录失败', e);
-    muteCache = {};
-  }
-}
-
-async function saveMutes() {
-  try { await Storage.set(MUTE_KEY, JSON.stringify(muteCache)); }
-  catch (e) { console.warn('[提醒] 保存静音记录失败', e); }
-}
-
-/* 清掉过期记录，避免文件越堆越大 */
-function pruneMutes(todayStr) {
-  let changed = false;
-  Object.keys(muteCache).forEach(id => {
-    const days = muteCache[id];
-    if (!days || typeof days !== 'object') { delete muteCache[id]; changed = true; return; }
-    Object.keys(days).forEach(d => {
-      if (d < todayStr) { delete days[d]; changed = true; }
-    });
-    if (!Object.keys(days).length) { delete muteCache[id]; changed = true; }
-  });
-  return changed;
-}
-
-function isMuted(habitId, dateStr) {
-  const days = muteCache[habitId];
-  return !!(days && days[dateStr]);
-}
-
-async function muteDay(habitId, dateStr) {
-  if (!habitId || !dateStr) return;
-  if (!muteCache[habitId]) muteCache[habitId] = {};
-  muteCache[habitId][dateStr] = 1;
-  await saveMutes();
-}
 
 function getNotifyPlugin() {
   if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
@@ -2224,7 +2195,6 @@ async function setupReminderChannel() {
       types: [{
         id: REMIND_ACTION_TYPE,
         actions: [
-          { id: 'skipToday', title: '今天不再提醒' },
           { id: 'open', title: '去打卡', foreground: true }
         ]
       }]
@@ -2233,14 +2203,9 @@ async function setupReminderChannel() {
     console.warn('[提醒] 注册通知按钮失败', e);
   }
   try {
-    LN.addListener('localNotificationActionPerformed', async ev => {
+    LN.addListener('localNotificationActionPerformed', ev => {
       const extra = (ev && ev.notification && ev.notification.extra) || {};
       if (!extra.checkinHabitId) return;
-      if (ev && ev.actionId === 'skipToday') {
-        await cancelDayReminders(extra.checkinHabitId, extra.checkinDate);
-        renderHabits();
-        return;
-      }
       // 点通知本体、或点「去打卡」：直接滚到该项目的这一天/这个时段
       focusHabit(extra.checkinHabitId, extra.checkinDate, extra.checkinSlot);
     });
@@ -2272,7 +2237,23 @@ async function cancelNotifications(list) {
 }
 
 async function cancelAllCheckinReminders() {
-  await cancelNotifications(await getCheckinPending());
+  const LN = getNotifyPlugin();
+  if (!LN) return;
+  let list = [];
+  try {
+    const res = await LN.getPending();
+    list = (res && res.notifications) || [];
+  } catch (e) {
+    return;
+  }
+  // 连同旧版本遗留的「无 habit id」孤儿通知一起清掉：
+  // 本应用的提醒 id 固定在 20000~20299，落在这个区间就一定是我们的
+  const targets = list.filter(n => {
+    const inRange = typeof n.id === 'number'
+      && n.id >= REMIND_ID_BASE && n.id < REMIND_ID_BASE + REMIND_MAX_TOTAL;
+    return inRange || !!(n.extra && n.extra.checkinHabitId);
+  });
+  await cancelNotifications(targets);
 }
 
 async function cancelHabitReminders(habitId) {
@@ -2289,15 +2270,6 @@ async function cancelSlotReminders(habitId, dateStr, slotIndex) {
     n.extra.checkinDate === dateStr &&
     n.extra.checkinSlot === slotIndex);
   await cancelNotifications(targets);
-}
-
-/* 通知上点「今天不再提醒」：这个项目当天所有时段都取消，并记下来别再排 */
-async function cancelDayReminders(habitId, dateStr) {
-  if (!habitId) return;
-  const targets = (await getCheckinPending()).filter(n =>
-    n.extra.checkinHabitId === habitId && n.extra.checkinDate === dateStr);
-  await cancelNotifications(targets);
-  await muteDay(habitId, dateStr);
 }
 
 function isDateInHabit(habit, dateStr) {
@@ -2321,12 +2293,18 @@ function rescheduleAllReminders() {
 async function doRescheduleAllReminders() {
   const LN = getNotifyPlugin();
   if (!LN) return;
-  lastScheduleInfo = { at: Date.now(), planned: 0, scheduled: 0, warning: '', error: '', nextAt: null };
+  const habits = getHabits();
+  // 历史数据可能缺 id：排程前补齐并落库，否则通知无法取消/定位
+  if (ensureHabitIds(habits)) saveHabits(habits);
+  lastScheduleInfo = {
+    at: Date.now(), planned: 0, scheduled: 0,
+    warning: '', error: '', nextAt: null, byHabit: {}
+  };
   await cancelAllCheckinReminders();
 
   const now = Date.now();
   const items = [];
-  getHabits().forEach(h => {
+  habits.forEach(h => {
     if (getHabitType(h) !== TYPE_DAILY) return;
     if (h.masterLocked) return;                       // 全部锁定 = 不打扰
     const slots = getSlotCount(h.mode || 'single');
@@ -2342,7 +2320,6 @@ async function doRescheduleAllReminders() {
         base.setDate(base.getDate() + d);
         const dateStr = formatDate(base);
         if (!isDateInHabit(h, dateStr)) continue;
-        if (isMuted(h.id, dateStr)) continue;            // 点过「今天不再提醒」
         if (getDayStatus(h, dateStr)[s]) continue;     // 该时段已经打过卡
         for (let k = 0; k < REMIND_MAX_TIMES; k++) {
           const at = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hh, mm + k * REMIND_GAP_MIN, 0, 0);
@@ -2356,6 +2333,18 @@ async function doRescheduleAllReminders() {
   items.sort((a, b) => a.at - b.at);
   const picked = items.slice(0, REMIND_MAX_TOTAL);
   lastScheduleInfo.planned = picked.length;
+
+  // 按项目统计：弹窗要显示「刚保存的项目」排了几条、下一次几点
+  const byHabit = {};
+  picked.forEach(it => {
+    const hid = it.habit.id;
+    if (!hid) return;
+    if (!byHabit[hid]) byHabit[hid] = { count: 0, nextAt: null };
+    byHabit[hid].count++;
+    if (byHabit[hid].nextAt === null) byHabit[hid].nextAt = it.at.getTime();
+  });
+  lastScheduleInfo.byHabit = byHabit;
+
   const notifications = picked.map((it, idx) => {
     const multi = getSlotCount(it.habit.mode || 'single') > 1;
     const label = multi ? getSlotLabel(it.habit, it.slot) : '';
@@ -2475,7 +2464,7 @@ async function verifyScheduleSoon() {
 }
 
 /* 保存/修改完项目后走这一条：权限要全 → 排 → 居中缓冲弹窗两阶段报结果 */
-async function applyReminders(reminderTimes) {
+async function applyReminders(reminderTimes, habitId) {
   const hasTime = Array.isArray(reminderTimes) && reminderTimes.some(t => t);
   if (!hasTime) { await rescheduleAllReminders(); return; }
 
@@ -2491,15 +2480,29 @@ async function applyReminders(reminderTimes) {
     alert('排提醒失败：' + lastScheduleInfo.error + '\n\n稍后可以到右上角 ! → 提醒设置 里重排一次。');
     return;
   }
-  if (!lastScheduleInfo.scheduled) { closeSyncModal(); return; }   // 没排上任何东西（比如都打过了卡），不打扰
 
-  await verifyScheduleSoon();
+  if (lastScheduleInfo.scheduled > 0) await verifyScheduleSoon();
   if (runId !== syncRunId) return;
-  const next = lastScheduleInfo.nextAt ? fmtStamp(lastScheduleInfo.nextAt) : '';
-  finishSyncModal(
-    '已排 ' + lastScheduleInfo.scheduled + ' 条提醒' + (next ? '，最早 ' + next + ' 响' : ''),
-    '可在右上角【!】里查看通知提醒状态和【问题总览】'
-  );
+
+  // 刚保存这个项目本次排了几条、下一次是几点；总数用系统实际待发数
+  const stat = (lastScheduleInfo.byHabit && lastScheduleInfo.byHabit[habitId])
+    || { count: 0, nextAt: null };
+  let total = 0;
+  try { total = (await getCheckinPending()).length; } catch (e) { total = 0; }
+  if (!total) total = lastScheduleInfo.scheduled;
+
+  let main;
+  if (stat.count > 0) {
+    main = '已添加 ' + stat.count + ' 项通知，当前总通知数为 ' + total + '。'
+      + (stat.nextAt ? '最早 ' + fmtStamp(stat.nextAt) + ' 响应。' : '');
+  } else {
+    main = '本次没有为该项目新增通知（时间已过或已全部打卡）。当前总通知数为 ' + total + '。';
+  }
+  finishSyncModal(main, '可在右上角【!】里查看通知提醒状态和【问题总览】');
+
+  // 面板正开着就顺手刷新，避免停留在旧数字
+  const rs = document.getElementById('reminderStatusModal');
+  if (rs && rs.classList.contains('active')) showReminderStatus();
 }
 
 function scheduleRemindersSoon() {
@@ -2515,8 +2518,8 @@ async function initReminders() {
   const LN = getNotifyPlugin();
   if (!LN) return;
   await setupReminderChannel();
-  await loadMutes();
-  if (pruneMutes(formatDate(new Date()))) await saveMutes();
+  // 旧版本的「今天不再提醒」静音记录已废弃，清掉避免影响当天排程
+  try { await Storage.set('checkin_mutes_v1', '{}'); } catch (e) { /* 忽略 */ }
   notifyPermission = await ensureNotifyPermission(true);
   if (notifyPermission) {
     await refreshExactAlarm();
