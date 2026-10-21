@@ -6,8 +6,8 @@
 
 安卓手机可直接安装（两个地址内容相同，选能打开的即可）：
 
-- GitHub：[下载最新版 APK](https://github.com/ZJL2221/Daily-check-in/releases/latest)
-- Gitee：[下载 v1.2 APK](https://gitee.com/JLZZZ/Daily-check-in/releases/download/v1.2/app-release.apk)
+- GitHub：[下载 v1.3 APK](https://github.com/ZJL2221/Daily-check-in/releases/download/v1.3/app-release.apk)
+- Gitee：[下载 v1.3 APK](https://gitee.com/JLZZZ/Daily-check-in/releases/download/v1.3/app-release.apk)
 
 首次安装需在系统设置中允许「安装未知来源的应用」。
 
@@ -80,7 +80,8 @@ npm test
 
 | 标签 | 说明 |
 | --- | --- |
-| `v1.2`（当前最新） | 打卡提醒、12 套主题、字号与开屏动画设置、使用说明重做 |
+| `v1.3`（当前最新） | 修复新建打卡的提醒失联、移除「今天不再提醒」、主题折叠与主界面预览 |
+| `v1.2` | 打卡提醒、12 套主题、字号与开屏动画设置、使用说明重做 |
 | `v1.1` | 新增「记录清单」类型，修复导入备份的注入问题 |
 | `v1.0` | 首个安卓版，源码拆分为 lib.js + app.js 多层结构 |
 | `v0.1` | 最初版本，单文件 `index.html` 网页版 |
